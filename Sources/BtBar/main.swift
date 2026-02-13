@@ -1678,32 +1678,29 @@ class StatusBarManager {
             
             // 添加分隔线和设置项
             if !devicesArray.isEmpty {
-                menu.addItem(NSMenuItem.separator())
+                menu.addItem(createVisualEffectSeparator())
             } else {
                 // 添加无设备提示
                 let noDevicesItem = NSMenuItem(title: "No paired Bluetooth devices found", action: nil, keyEquivalent: "")
                 noDevicesItem.isEnabled = false
                 menu.addItem(noDevicesItem)
-                menu.addItem(NSMenuItem.separator())
+                menu.addItem(createVisualEffectSeparator())
             }
             
             // 添加设置项
-            let settingsItem = NSMenuItem(title: "Settings", action: #selector(self.openSettings), keyEquivalent: "")
-            settingsItem.target = self
-            // 添加系统图标
             if let settingsImage = NSImage(systemSymbolName: "gear", accessibilityDescription: "Settings") {
-                settingsItem.image = settingsImage
+                let settingsItem = createMenuItemWithVisualEffect(title: "Settings", action: #selector(self.openSettings), keyEquivalent: "", image: settingsImage, target: self)
+                menu.addItem(settingsItem)
             }
-            menu.addItem(settingsItem)
             
             // 添加退出项
-            let quitItem = NSMenuItem(title: "Quit", action: #selector(self.quitApp), keyEquivalent: "")
-            quitItem.target = self
-            // 添加系统图标
             if let quitImage = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Quit") {
-                quitItem.image = quitImage
+                let quitItem = createMenuItemWithVisualEffect(title: "Quit", action: #selector(self.quitApp), keyEquivalent: "", image: quitImage, target: self)
+                menu.addItem(quitItem)
             }
-            menu.addItem(quitItem)
+            
+            // 添加带有毛玻璃效果的空白菜单项，覆盖菜单底部边缘
+            menu.addItem(createVisualEffectSpacer())
             
             // 缓存菜单
             self.cachedMenu = menu
@@ -1735,25 +1732,22 @@ class StatusBarManager {
             let noDevicesItem = NSMenuItem(title: "No paired Bluetooth devices found", action: nil, keyEquivalent: "")
             noDevicesItem.isEnabled = false
             menu.addItem(noDevicesItem)
-            menu.addItem(NSMenuItem.separator())
+            menu.addItem(createVisualEffectSeparator())
             
             // 添加设置项
-            let settingsItem = NSMenuItem(title: "Settings", action: #selector(self.openSettings), keyEquivalent: "")
-            settingsItem.target = self
-            // 添加系统图标
             if let settingsImage = NSImage(systemSymbolName: "gear", accessibilityDescription: "Settings") {
-                settingsItem.image = settingsImage
+                let settingsItem = createMenuItemWithVisualEffect(title: "Settings", action: #selector(self.openSettings), keyEquivalent: "", image: settingsImage, target: self)
+                menu.addItem(settingsItem)
             }
-            menu.addItem(settingsItem)
             
             // 添加退出项
-            let quitItem = NSMenuItem(title: "Quit", action: #selector(self.quitApp), keyEquivalent: "")
-            quitItem.target = self
-            // 添加系统图标
             if let quitImage = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Quit") {
-                quitItem.image = quitImage
+                let quitItem = createMenuItemWithVisualEffect(title: "Quit", action: #selector(self.quitApp), keyEquivalent: "", image: quitImage, target: self)
+                menu.addItem(quitItem)
             }
-            menu.addItem(quitItem)
+            
+            // 添加带有毛玻璃效果的空白菜单项，覆盖菜单底部边缘
+            menu.addItem(createVisualEffectSpacer())
             
             // 缓存菜单
             self.cachedMenu = menu
@@ -1777,10 +1771,17 @@ class StatusBarManager {
     
     private func addDeviceMenuItem(to menu: NSMenu, device: BluetoothDevice) {
         // 创建紧凑的设备菜单项
-        let deviceItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        let deviceItem = NSMenuItem(title: "", action: #selector(handleDeviceItemClick(_:)), keyEquivalent: "")
+        deviceItem.target = self
+        deviceItem.representedObject = device // 设置 representedObject 以便后续检测状态变化
         
         // 创建设备信息视图 - 更紧凑的布局
-        let deviceView = NSView(frame: NSRect(x: 0, y: 0, width: 220, height: 36))
+            let deviceView = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: 220, height: 36))
+            deviceView.wantsLayer = true
+            deviceView.material = .menu // 使用与菜单相同的材质
+            deviceView.blendingMode = .withinWindow // 更改混合模式以获得更好的毛玻璃效果
+            deviceView.state = .active
+            deviceView.appearance = NSAppearance(named: .darkAqua) // 使用暗色外观，确保与菜单背景一致
         
         // 添加设备图标
         let iconImageView = NSImageView(frame: NSRect(x: 13, y: 6, width: 24, height: 24))
@@ -1832,8 +1833,61 @@ class StatusBarManager {
         menu.addItem(deviceItem)
     }
     
+    private func createMenuItemWithVisualEffect(title: String, action: Selector?, keyEquivalent: String, image: NSImage? = nil, target: AnyObject? = nil) -> NSMenuItem {
+        let menuItem = NSMenuItem(title: title, action: action, keyEquivalent: keyEquivalent)
+        menuItem.target = target
+        menuItem.image = image
+        return menuItem
+    }
+    
+    private func createVisualEffectSeparator() -> NSMenuItem {
+        let separatorItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        
+        // 创建毛玻璃效果的背景视图
+        let separatorView = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: 220, height: 20))
+        separatorView.wantsLayer = true
+        separatorView.material = .menu // 使用与菜单相同的材质
+        separatorView.blendingMode = .withinWindow // 更改混合模式以获得更好的毛玻璃效果
+        separatorView.state = .active
+        separatorView.appearance = NSAppearance(named: .darkAqua) // 使用暗色外观，确保与菜单背景一致
+        
+        // 添加分割线
+        let separatorLine = NSView(frame: NSRect(x: 13, y: 9, width: 194, height: 1))
+        separatorLine.wantsLayer = true
+        separatorLine.layer?.backgroundColor = NSColor.separatorColor.cgColor
+        separatorView.addSubview(separatorLine)
+        
+        separatorItem.view = separatorView
+        separatorItem.isEnabled = false
+        return separatorItem
+    }
+    
+    private func createVisualEffectSpacer() -> NSMenuItem {
+        let spacerItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        
+        // 创建毛玻璃效果的背景视图，增加高度以完全覆盖菜单底部边缘
+        let spacerView = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: 220, height: 10))
+        spacerView.wantsLayer = true
+        spacerView.material = .menu // 使用与菜单相同的材质
+        spacerView.blendingMode = .withinWindow // 更改混合模式以获得更好的毛玻璃效果
+        spacerView.state = .active
+        spacerView.appearance = NSAppearance(named: .darkAqua) // 使用暗色外观，确保与菜单背景一致
+        
+        spacerItem.view = spacerView
+        spacerItem.isEnabled = false
+        return spacerItem
+    }
+    
+    @objc private func handleDeviceItemClick(_ sender: NSMenuItem) {
+        // 处理设备菜单项的点击事件
+        // 由于设备菜单项的主要功能是显示子菜单，我们只需要确保菜单项可以被点击
+        // 子菜单的显示会由系统自动处理
+    }
+    
     private func createDeviceSubmenu(device: BluetoothDevice) -> NSMenu {
         let submenu = NSMenu()
+        // 设置二级菜单外观为暗色，确保与主菜单背景一致
+        submenu.appearance = NSAppearance(named: .darkAqua)
         
         // 连接/断开操作
         let connectAction = device.isConnected ? "Disconnect" : "Connect"
