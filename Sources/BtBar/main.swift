@@ -1186,6 +1186,7 @@ class StatusBarManager {
     private var cancellables = Set<AnyCancellable>()
     private var showDeviceIcons: [String: Bool] = [:] // 存储设备图标显示设置
     private var lastDeviceStates: [String: (isConnected: Bool, customIconName: String?, batteryLevel: Int?)] = [:] // 存储设备的最后状态
+    private var settingsWindow: NSWindow? // 存储设置窗口引用，避免被释放
     
     init(bluetoothManager: BluetoothManager) {
         self.bluetoothManager = bluetoothManager
@@ -1586,6 +1587,8 @@ class StatusBarManager {
             
             // 创建新菜单
             let menu = NSMenu()
+            // 设置菜单外观为暗色，确保与气泡背景一致
+            menu.appearance = NSAppearance(named: .darkAqua)
             
             // 分离已连接和未连接的设备
             var connectedDevices: [BluetoothDevice] = []
@@ -1725,6 +1728,8 @@ class StatusBarManager {
             
             // 创建新菜单
             let menu = NSMenu()
+            // 设置菜单外观为暗色，确保与气泡背景一致
+            menu.appearance = NSAppearance(named: .darkAqua)
             
             // 添加无设备提示
             let noDevicesItem = NSMenuItem(title: "No paired Bluetooth devices found", action: nil, keyEquivalent: "")
@@ -2074,14 +2079,16 @@ class StatusBarManager {
                     popover.contentSize = NSSize(width: 220, height: 140) // 调整尺寸以适应电池图标
                     popover.animates = true // 添加动画效果
                     // 确保气泡显示到最上层
-                    popover.appearance = NSAppearance(named: .aqua)
+                    popover.appearance = NSAppearance(named: .darkAqua) // 使用暗色外观，确保与菜单背景一致
                     
                     // 创建磨砂玻璃效果的背景视图
                     let visualEffectView = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: 220, height: 140)) // 调整尺寸以适应电池图标
                     visualEffectView.wantsLayer = true
-                    visualEffectView.material = .popover
-                    visualEffectView.blendingMode = .behindWindow
+                    visualEffectView.material = .menu // 使用与菜单相同的材质
+                    visualEffectView.blendingMode = .withinWindow // 更改混合模式以获得更好的毛玻璃效果
                     visualEffectView.state = .active
+                    // 强制设置外观为暗色，确保与菜单背景一致
+                    visualEffectView.appearance = NSAppearance(named: .darkAqua)
                     
                     /////////////////////// 添加设备图标
                     let iconImageView = NSImageView(frame: NSRect(x: 12, y: 95, width: 28, height: 28)) // 调整位置和大小，整体向上移动
@@ -2210,6 +2217,12 @@ class StatusBarManager {
         
         // 显示设置窗口
         DispatchQueue.main.async {
+            // 如果已有设置窗口，先关闭它
+            if let existingWindow = self.settingsWindow {
+                existingWindow.close()
+            }
+            
+            // 创建新的设置窗口
             let settingsWindow = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 400, height: 500),
                 styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -2222,7 +2235,23 @@ class StatusBarManager {
             // 创建SwiftUI视图并设置为窗口内容
             let settingsView = SettingsView().environmentObject(self.bluetoothManager)
             let hostingController = NSHostingController(rootView: settingsView)
-            settingsWindow.contentView = hostingController.view
+            
+            // 创建毛玻璃效果的背景视图
+            let visualEffectView = NSVisualEffectView(frame: settingsWindow.contentRect(forFrameRect: settingsWindow.frame))
+            visualEffectView.wantsLayer = true
+            visualEffectView.material = .menu // 使用与菜单相同的材质
+            visualEffectView.blendingMode = .withinWindow // 更改混合模式以获得更好的毛玻璃效果
+            visualEffectView.state = .active
+            // 强制设置外观为暗色，确保与菜单背景一致
+            visualEffectView.appearance = NSAppearance(named: .darkAqua)
+            
+            // 将SwiftUI视图添加到毛玻璃背景上
+            visualEffectView.addSubview(hostingController.view)
+            hostingController.view.frame = visualEffectView.bounds
+            hostingController.view.autoresizingMask = [.width, .height]
+            
+            // 设置窗口内容为毛玻璃背景视图
+            settingsWindow.contentView = visualEffectView
             
             // 确保应用程序处于活动状态
             NSApp.activate(ignoringOtherApps: true)
@@ -2231,6 +2260,9 @@ class StatusBarManager {
             settingsWindow.makeKeyAndOrderFront(nil)
             // 确保窗口在所有窗口之上
             settingsWindow.level = .floating
+            
+            // 存储窗口引用，避免被释放
+            self.settingsWindow = settingsWindow
         }
     }
     
