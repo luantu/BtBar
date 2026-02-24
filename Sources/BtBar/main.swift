@@ -5,6 +5,7 @@ import CoreBluetooth
 import UserNotifications
 import IOBluetooth
 import CoreImage
+import CoreAudio
 
 // 全局工具函数
 func localTimeString() -> String {
@@ -12,6 +13,122 @@ func localTimeString() -> String {
     dateFormatter.timeZone = TimeZone.current
     dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss z"
     return dateFormatter.string(from: Date())
+}
+
+// 音频设备管理函数
+func getAudioDevices() -> [(id: AudioDeviceID, name: String)] {
+    var devices: [(id: AudioDeviceID, name: String)] = []
+    var propertyAddress = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwarePropertyDevices,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    
+    var propertySize: UInt32 = 0
+    var result = AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &propertyAddress, 0, nil, &propertySize)
+    if result != noErr {
+        print("Error getting audio devices size: \(result)")
+        return devices
+    }
+    
+    let deviceCount = Int(propertySize) / MemoryLayout<AudioDeviceID>.size
+    var deviceIDs = [AudioDeviceID](repeating: 0, count: deviceCount)
+    result = AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &propertyAddress, 0, nil, &propertySize, &deviceIDs)
+    if result != noErr {
+        print("Error getting audio devices: \(result)")
+        return devices
+    }
+    
+    for deviceID in deviceIDs {
+        var name: CFString = "" as CFString
+        var nameSize: UInt32 = UInt32(MemoryLayout<CFString>.size)
+        propertyAddress.mSelector = kAudioDevicePropertyDeviceNameCFString
+        propertyAddress.mScope = kAudioObjectPropertyScopeGlobal
+        propertyAddress.mElement = kAudioObjectPropertyElementMain
+        
+        result = AudioObjectGetPropertyData(deviceID, &propertyAddress, 0, nil, &nameSize, &name)
+        if result == noErr {
+            devices.append((id: deviceID, name: name as String))
+        }
+    }
+    
+    return devices
+}
+
+func setDefaultAudioDevice(_ deviceID: AudioDeviceID) -> Bool {
+    // 尝试设置默认输出设备
+    var propertyAddress = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    
+    var mutableDeviceID = deviceID
+    var result = AudioObjectSetPropertyData(AudioObjectID(kAudioObjectSystemObject), &propertyAddress, 0, nil, UInt32(MemoryLayout<AudioDeviceID>.size), &mutableDeviceID)
+    if result != noErr {
+        print("Error setting default output device: \(result)")
+        return false
+    }
+    
+    // 尝试设置默认输入设备（如果设备同时支持输入）
+    propertyAddress.mSelector = kAudioHardwarePropertyDefaultInputDevice
+    result = AudioObjectSetPropertyData(AudioObjectID(kAudioObjectSystemObject), &propertyAddress, 0, nil, UInt32(MemoryLayout<AudioDeviceID>.size), &mutableDeviceID)
+    if result != noErr {
+        print("Warning: Error setting default input device: \(result)")
+        // 不返回失败，因为输出设备设置成功即可
+    }
+    
+    // 尝试设置默认系统设备
+    propertyAddress.mSelector = kAudioHardwarePropertyDefaultSystemOutputDevice
+    result = AudioObjectSetPropertyData(AudioObjectID(kAudioObjectSystemObject), &propertyAddress, 0, nil, UInt32(MemoryLayout<AudioDeviceID>.size), &mutableDeviceID)
+    if result != noErr {
+        print("Warning: Error setting default system output device: \(result)")
+    }
+    
+    // 等待一小段时间，让系统完成切换
+    usleep(100000) // 100ms
+    
+    return true
+}
+
+func findAudioDeviceByName(_ name: String) -> AudioDeviceID? {
+    let devices = getAudioDevices()
+    for device in devices {
+        if device.name.lowercased().contains(name.lowercased()) {
+            return device.id
+        }
+    }
+    return nil
+}
+
+func getCurrentDefaultAudioDevice() -> (id: AudioDeviceID, name: String)? {
+    var propertyAddress = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    
+    var deviceID: AudioDeviceID = 0
+    var propertySize: UInt32 = UInt32(MemoryLayout<AudioDeviceID>.size)
+    let result = AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &propertyAddress, 0, nil, &propertySize, &deviceID)
+    
+    if result != noErr {
+        print("Error getting current default audio device: \(result)")
+        return nil
+    }
+    
+    // 获取设备名称
+    var name: CFString = "" as CFString
+    var nameSize: UInt32 = UInt32(MemoryLayout<CFString>.size)
+    propertyAddress.mSelector = kAudioDevicePropertyDeviceNameCFString
+    
+    let nameResult = AudioObjectGetPropertyData(deviceID, &propertyAddress, 0, nil, &nameSize, &name)
+    if nameResult != noErr {
+        print("Error getting current default audio device name: \(nameResult)")
+        return (id: deviceID, name: "Unknown")
+    }
+    
+    return (id: deviceID, name: name as String)
 }
 
 @main
@@ -1410,6 +1527,60 @@ class StatusBarManager {
                         // 模拟点击状态栏图标，触发气泡显示，并设置5秒后自动关闭
                         self.showDeviceDetailsForDevice(device, autoClose: true)
                     }
+                    
+                    // 尝试将系统默认声音设备切换为当前连接的蓝牙设备
+                    print("[\(timestamp)] 尝试切换系统默认声音设备为: \(device.name)")
+                    
+                    // 延迟2秒，确保音频设备完全初始化
+                    print("[\(timestamp)] 等待2秒，确保音频设备完全初始化...")
+                    usleep(2000000) // 2000ms
+                    
+                    // 打印当前所有可用的音频设备
+                    let allAudioDevices = getAudioDevices()
+                    print("[\(timestamp)] 可用音频设备列表:")
+                    for audioDevice in allAudioDevices {
+                        print("[\(timestamp)]   - \(audioDevice.name) (ID: \(audioDevice.id))")
+                    }
+                    
+                    // 获取切换前的默认音频设备
+                    if let beforeDevice = getCurrentDefaultAudioDevice() {
+                        print("[\(timestamp)] 切换前默认音频设备: \(beforeDevice.name) (ID: \(beforeDevice.id))")
+                    }
+                    
+                    // 收集所有匹配的音频设备
+                    let lowerDeviceName = device.name.lowercased()
+                    let matchingDevices = allAudioDevices.filter { $0.name.lowercased().contains(lowerDeviceName) }
+                    print("[\(timestamp)] 找到 \(matchingDevices.count) 个匹配的音频设备")
+                    
+                    // 尝试切换到每个匹配的设备
+                    for (index, audioDevice) in matchingDevices.enumerated() {
+                        print("[\(timestamp)] 尝试切换到匹配设备 \(index + 1)/\(matchingDevices.count): \(audioDevice.name) (ID: \(audioDevice.id))")
+                        
+                        // 尝试切换默认音频设备
+                        let success = setDefaultAudioDevice(audioDevice.id)
+                        print("[\(timestamp)] 切换默认音频设备结果: \(success ? "成功" : "失败")")
+                        
+                        // 再次获取当前默认音频设备，确认切换是否成功
+                        if success {
+                            // 等待1秒，让系统完成切换
+                            usleep(1000000) // 1000ms
+                            
+                            print("[\(timestamp)] 切换后验证默认音频设备...")
+                            if let afterDevice = getCurrentDefaultAudioDevice() {
+                                print("[\(timestamp)] 切换后默认音频设备: \(afterDevice.name) (ID: \(afterDevice.id))")
+                                if afterDevice.id == audioDevice.id {
+                                    print("[\(timestamp)] ✅ 音频设备切换成功!")
+                                    // 切换成功，退出循环
+                                    break
+                                } else {
+                                    print("[\(timestamp)] ❌ 音频设备切换失败，当前默认设备与目标设备不匹配")
+                                    // 继续尝试下一个设备
+                                }
+                            }
+                        }
+                    }
+                    
+                    print("[\(timestamp)] 音频设备切换流程完成")
                 }
             }
             print("[\(timestamp)] 状态栏图标更新完成，当前状态栏图标数量: \(self.statusItems.count)")
