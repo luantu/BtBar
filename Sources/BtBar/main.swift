@@ -1809,12 +1809,8 @@ class StatusBarManager {
                     // 确保按钮大小正确
                     button.frame = NSRect(x: 0, y: 0, width: 20, height: 20)
                     
-                    // 使用可复用的方法获取设备图标
-                    if let deviceIcon = self.getDeviceIcon(for: device, size: NSSize(width: 16, height: 16), applyTemplateForDisconnected: false) {
-                        // 确保图片大小正确
-                        deviceIcon.size = NSSize(width: 16, height: 16)
-                        // 确保图标不使用模板模式，保持原始白色
-                        deviceIcon.isTemplate = false
+                    // 使用可复用的方法获取设备图标，使用模板模式让系统根据主题自动调整颜色
+                    if let deviceIcon = self.getDeviceIcon(for: device, size: NSSize(width: 16, height: 16), applyTemplate: true) {
                         button.image = deviceIcon
                         // 确保图片显示模式正确
                         button.imageScaling = .scaleProportionallyUpOrDown
@@ -1822,8 +1818,8 @@ class StatusBarManager {
                     } else {
                         // 如果所有图标都不可用，使用随机图标
                         let randomIcon = self.generateRandomIcon()
-                        // 确保随机图标不使用模板模式，保持原始颜色
-                        randomIcon.isTemplate = false
+                        // 使用模板模式让系统根据主题自动调整颜色
+                        randomIcon.isTemplate = true
                         button.image = randomIcon
                         print("[\(timestamp)] 使用随机图标为设备: \(device.name)")
                     }
@@ -1966,36 +1962,43 @@ class StatusBarManager {
     }
     
     // 获取设备图标，可复用的方法
-    private func getDeviceIcon(for device: BluetoothDevice, size: NSSize, applyTemplateForDisconnected: Bool = true) -> NSImage? {
-        // 尝试使用设备的自定义图标
-        if let customIconPath = device.customIconName {
-            // 尝试使用用户选择的图片文件
-            if let image = NSImage(contentsOfFile: customIconPath) {
-                // 缩放图片到指定大小
-                let scaledImage = scaleImage(image, toSize: size)
-                // 始终设置为模板图片，确保在深色模式下正确显示
-                scaledImage.isTemplate = true
-                return scaledImage
+    private func getDeviceIcon(for device: BluetoothDevice, size: NSSize, applyTemplate: Bool = true) -> NSImage? {
+        // 尝试使用设备的自定义图标（系统符号名称）
+        if let customIconName = device.customIconName {
+            // 尝试使用用户选择的系统符号，使用symbolConfiguration来设置大小
+            if let image = NSImage(systemSymbolName: customIconName, accessibilityDescription: device.name) {
+                // 使用symbolConfiguration设置图标大小
+                let configuration = NSImage.SymbolConfiguration(pointSize: size.height, weight: .regular)
+                if let configuredImage = image.withSymbolConfiguration(configuration) {
+                    // 根据参数设置是否使用模板模式
+                    configuredImage.isTemplate = applyTemplate
+                    return configuredImage
+                }
+                return image
             } else {
-                print("无法读取用户选择的图片文件: \(customIconPath)")
+                print("无法找到系统符号: \(customIconName)")
             }
         }
         
         // 如果没有自定义图标或自定义图标不可用，使用系统图标
         let systemIconName = getSystemIconName(for: device.defaultIconName)
         if let image = NSImage(systemSymbolName: systemIconName, accessibilityDescription: device.name) {
-            // 缩放系统图标到指定大小
-            let scaledImage = scaleImage(image, toSize: size)
-            // 始终设置为模板图片，确保在深色模式下正确显示
-            scaledImage.isTemplate = true
-            return scaledImage
+            // 使用symbolConfiguration设置图标大小
+            let configuration = NSImage.SymbolConfiguration(pointSize: size.height, weight: .regular)
+            if let configuredImage = image.withSymbolConfiguration(configuration) {
+                // 根据参数设置是否使用模板模式
+                configuredImage.isTemplate = applyTemplate
+                return configuredImage
+            }
+            return image
         }
         
         // 如果系统图标也不可用，使用应用图标
         if let customImage = getCustomIcon() {
+            // 缩放应用图标到指定大小
             let scaledImage = scaleImage(customImage, toSize: size)
-            // 始终设置为模板图片，确保在深色模式下正确显示
-            scaledImage.isTemplate = true
+            // 根据参数设置是否使用模板模式
+            scaledImage.isTemplate = applyTemplate
             return scaledImage
         }
         
@@ -2421,7 +2424,7 @@ class StatusBarManager {
         
         // 添加设备图标
         let iconImageView = NSImageView(frame: NSRect(x: 8, y: 4, width: 24, height: 24))
-        if let deviceIcon = getDeviceIcon(for: device, size: NSSize(width: 24, height: 24)) {
+        if let deviceIcon = getDeviceIcon(for: device, size: NSSize(width: 24, height: 24), applyTemplate: true) {
             iconImageView.image = deviceIcon
         }
         deviceView.addSubview(iconImageView)
@@ -2561,127 +2564,114 @@ class StatusBarManager {
             // 确保应用程序处于活动状态
             NSApp.activate(ignoringOtherApps: true)
             
-            // 创建文件选择器
-            let openPanel = NSOpenPanel()
-            openPanel.title = "Select Icon for \(device.name)"
-            openPanel.showsResizeIndicator = true
-            openPanel.showsHiddenFiles = false
-            openPanel.canChooseDirectories = false
-            openPanel.canCreateDirectories = false
-            openPanel.allowsMultipleSelection = false
+            // 创建带有文本输入框的警告对话框
+            let alert = NSAlert()
+            alert.messageText = "Change Icon for \(device.name)"
+            alert.informativeText = "Enter the system symbol name (e.g., 'bluetooth', 'headphones', 'airpods.gen3')"
             
-            // 设置允许的文件类型
-            openPanel.allowedContentTypes = [.png, .jpeg, .gif, .tiff]
-            
-            // 定义处理文件选择的闭包
-            let handleFileSelection: (URL) -> Void = { [weak self] url in
-                guard let self = self else { return }
-                
-                // 读取用户选择的图片文件
-                guard let image = NSImage(contentsOf: url) else {
-                    self.showErrorAlert(title: "Error", message: "Failed to load the selected image. Please try another file.")
-                    print("Failed to load image from URL: \(url)")
-                    return
-                }
-                
-                // 保存图片到应用的临时目录
-                let fileManager = FileManager.default
-                let tempDir = NSTemporaryDirectory()
-                
-                // 确保临时目录存在
-                do {
-                    try fileManager.createDirectory(atPath: tempDir, withIntermediateDirectories: true, attributes: nil)
-                } catch {
-                    self.showErrorAlert(title: "Error", message: "Failed to access temporary directory. Please try again.")
-                    print("Error accessing temporary directory: \(error)")
-                    return
-                }
-                
-                let timestamp = Int(Date().timeIntervalSince1970)
-                let iconFileName = "device_\(device.id)_\(timestamp).png"
-                let iconPath = tempDir.appending(iconFileName)
-                
-                // 将图片保存为PNG格式
-                guard let tiffData = image.tiffRepresentation, 
-                      let bitmapImage = NSBitmapImageRep(data: tiffData), 
-                      let pngData = bitmapImage.representation(using: .png, properties: [:]) else {
-                    self.showErrorAlert(title: "Error", message: "Failed to convert image to PNG format. Please try another file.")
-                    print("Failed to convert image to PNG")
-                    return
-                }
-                
-                do {
-                    try pngData.write(to: URL(fileURLWithPath: iconPath))
-                    // 设置设备的自定义图标路径
-                    self.bluetoothManager.updateDeviceCustomIcon(device, iconName: iconPath)
-                    
-                    // 确保设备图标显示设置为true
-                    self.showDeviceIcons[device.id] = true
-                    self.saveDeviceDisplaySettings()
-                    
-                    // 更新状态栏图标
-                    self.updateStatusItems(devices: self.bluetoothManager.devices)
-                    
-                    // 显示成功消息
-                    self.showSuccessAlert(title: "Success", message: "Icon updated successfully for \(device.name)")
-                } catch {
-                    self.showErrorAlert(title: "Error", message: "Failed to save icon. Please check permissions and try again.")
-                    print("Error saving icon: \(error)")
-                }
+            // 添加文本输入框
+            let iconNameField = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
+            if let currentCustomIcon = device.customIconName {
+                iconNameField.stringValue = currentCustomIcon
             }
+            iconNameField.usesSingleLineMode = true
+            iconNameField.isBezeled = true
+            iconNameField.isEditable = true
+            iconNameField.isSelectable = true
+            alert.accessoryView = iconNameField
             
-            // 使用鼠标点击位置来显示文件选择器
-            if let clickLocation = lastClickLocation {
-                // 计算文件选择器的大小和位置
-                let panelSize = NSSize(width: 600, height: 400)
-                var panelFrame = NSRect(
-                    x: clickLocation.x - panelSize.width / 2,
-                    y: clickLocation.y - panelSize.height - 10,
-                    width: panelSize.width,
-                    height: panelSize.height
-                )
-                
-                // 确保文件选择器不会超出屏幕边界
-                if let screen = NSScreen.main {
-                    let screenFrame = screen.visibleFrame
+            // 添加按钮
+            alert.addButton(withTitle: "OK")
+            alert.addButton(withTitle: "Cancel")
+            
+            // 显示对话框并确保文本框获取焦点
+            if let window = NSApp.mainWindow ?? NSApp.windows.first {
+                // 使用窗口作为父窗口，确保对话框置顶显示
+                alert.beginSheetModal(for: window) { [weak self, iconNameField, device] response in
+                    guard let self = self else { return }
                     
-                    if panelFrame.origin.x < screenFrame.origin.x {
-                        panelFrame.origin.x = screenFrame.origin.x
-                    } else if panelFrame.origin.x + panelFrame.size.width > screenFrame.origin.x + screenFrame.size.width {
-                        panelFrame.origin.x = screenFrame.origin.x + screenFrame.size.width - panelFrame.size.width
-                    }
-                    
-                    if panelFrame.origin.y < screenFrame.origin.y {
-                        panelFrame.origin.y = screenFrame.origin.y
-                    } else if panelFrame.origin.y + panelFrame.size.height > screenFrame.origin.y + screenFrame.size.height {
-                        panelFrame.origin.y = screenFrame.origin.y + screenFrame.size.height - panelFrame.size.height
+                    if response == .alertFirstButtonReturn { // OK button
+                        let iconName = iconNameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                        
+                        if !iconName.isEmpty {
+                            // 尝试使用输入的符号名称创建图标，验证是否有效
+                            if NSImage(systemSymbolName: iconName, accessibilityDescription: device.name) != nil {
+                                // 更新设备的自定义图标名称
+                                self.bluetoothManager.updateDeviceCustomIcon(device, iconName: iconName)
+                                
+                                // 确保设备图标显示设置为true
+                                self.showDeviceIcons[device.id] = true
+                                self.saveDeviceDisplaySettings()
+                                
+                                // 更新状态栏图标
+                                self.updateStatusItems(devices: self.bluetoothManager.devices)
+                                
+                                // 显示成功消息
+                                self.showSuccessAlert(title: "Success", message: "Icon updated successfully for \(device.name)")
+                            } else {
+                                // 显示错误消息，符号名称无效
+                                self.showErrorAlert(title: "Error", message: "Invalid system symbol name. Please try another name.")
+                            }
+                        } else {
+                            // 清空图标，使用默认图标
+                            self.bluetoothManager.updateDeviceCustomIcon(device, iconName: nil)
+                            
+                            // 确保设备图标显示设置为true
+                            self.showDeviceIcons[device.id] = true
+                            self.saveDeviceDisplaySettings()
+                            
+                            // 更新状态栏图标
+                            self.updateStatusItems(devices: self.bluetoothManager.devices)
+                            
+                            // 显示成功消息
+                            self.showSuccessAlert(title: "Success", message: "Icon reset to default for \(device.name)")
+                        }
                     }
                 }
                 
-                // 设置文件选择器的位置
-                openPanel.setFrame(panelFrame, display: true)
-                
-                // 显示文件选择器
-                openPanel.begin { response in
-                    if response == .OK, let url = openPanel.url {
-                        handleFileSelection(url)
-                    }
+                // 确保文本框获取焦点
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    iconNameField.becomeFirstResponder()
                 }
             } else {
-                // 如果没有获取到点击位置，使用默认方式显示
-                if let window = NSApp.mainWindow ?? NSApp.windows.first {
-                    // 使用窗口作为父窗口，确保文件选择器置顶显示
-                    openPanel.beginSheetModal(for: window) { response in
-                        if response == .OK, let url = openPanel.url {
-                            handleFileSelection(url)
+                // 如果没有主窗口，使用默认方式显示
+                let response = alert.runModal()
+                
+                if response == .alertFirstButtonReturn { // OK button
+                    let iconName = iconNameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                    
+                    if !iconName.isEmpty {
+                        // 尝试使用输入的符号名称创建图标，验证是否有效
+                        if NSImage(systemSymbolName: iconName, accessibilityDescription: device.name) != nil {
+                            // 更新设备的自定义图标名称
+                            self.bluetoothManager.updateDeviceCustomIcon(device, iconName: iconName)
+                            
+                            // 确保设备图标显示设置为true
+                            self.showDeviceIcons[device.id] = true
+                            self.saveDeviceDisplaySettings()
+                            
+                            // 更新状态栏图标
+                            self.updateStatusItems(devices: self.bluetoothManager.devices)
+                            
+                            // 显示成功消息
+                            self.showSuccessAlert(title: "Success", message: "Icon updated successfully for \(device.name)")
+                        } else {
+                            // 显示错误消息，符号名称无效
+                            self.showErrorAlert(title: "Error", message: "Invalid system symbol name. Please try another name.")
                         }
-                    }
-                } else {
-                    // 如果没有主窗口，使用默认方式显示
-                    openPanel.begin { response in
-                        if response == .OK, let url = openPanel.url {
-                            handleFileSelection(url)
-                        }
+                    } else {
+                        // 清空图标，使用默认图标
+                        self.bluetoothManager.updateDeviceCustomIcon(device, iconName: nil)
+                        
+                        // 确保设备图标显示设置为true
+                        self.showDeviceIcons[device.id] = true
+                        self.saveDeviceDisplaySettings()
+                        
+                        // 更新状态栏图标
+                        self.updateStatusItems(devices: self.bluetoothManager.devices)
+                        
+                        // 显示成功消息
+                        self.showSuccessAlert(title: "Success", message: "Icon reset to default for \(device.name)")
                     }
                 }
             }
@@ -2969,11 +2959,9 @@ class StatusBarManager {
                     visualEffectView.appearance = NSAppearance(named: .darkAqua)
                     
                     /////////////////////// 添加设备图标
-                    let iconImageView = NSImageView(frame: NSRect(x: 12, y: 95, width: 28, height: 28)) // 调整位置和大小，整体向上移动
-                    // 使用可复用的方法获取设备图标
-                    if let deviceIcon = self.getDeviceIcon(for: device, size: NSSize(width: 28, height: 28), applyTemplateForDisconnected: false) {
-                        // 确保图标不使用模板模式，保持原始白色
-                        deviceIcon.isTemplate = false
+                    let iconImageView = NSImageView(frame: NSRect(x: 12, y: 92, width: 34, height: 34)) // 调整位置和大小，放大1.2倍
+                    // 使用可复用的方法获取设备图标，使用模板模式让系统根据主题自动调整颜色
+                    if let deviceIcon = self.getDeviceIcon(for: device, size: NSSize(width: 34, height: 34), applyTemplate: true) {
                         iconImageView.image = deviceIcon
                     }
                     visualEffectView.addSubview(iconImageView)
@@ -3040,14 +3028,14 @@ class StatusBarManager {
                             }
                             batteryView.addSubview(leftEarIcon)
                             
-                            let leftLevelLabel = NSTextField(frame: NSRect(x: currentX + 16, y: 0, width: 50, height: 20))
+                            let leftLevelLabel = NSTextField(frame: NSRect(x: currentX + 12, y: 0, width: 50, height: 20))
                             leftLevelLabel.stringValue = "\(leftLevel)%"
                             leftLevelLabel.isBezeled = false
                             leftLevelLabel.isEditable = false
                             leftLevelLabel.backgroundColor = .clear
                             leftLevelLabel.textColor = .secondaryLabelColor
                             batteryView.addSubview(leftLevelLabel)
-                            currentX += 55
+                            currentX += 50
                         }
                         
                         if let rightLevel = device.rightBatteryLevel {
@@ -3077,7 +3065,7 @@ class StatusBarManager {
                             }
                             batteryView.addSubview(rightEarIcon)
                             
-                            let rightLevelLabel = NSTextField(frame: NSRect(x: currentX + 16, y: 0, width: 50, height: 20))
+                            let rightLevelLabel = NSTextField(frame: NSRect(x: currentX + 12, y: 0, width: 50, height: 20))
                             rightLevelLabel.stringValue = "\(rightLevel)%"
                             rightLevelLabel.isBezeled = false
                             rightLevelLabel.isEditable = false
@@ -3115,7 +3103,7 @@ class StatusBarManager {
                             }
                             batteryView.addSubview(caseIcon)
                             
-                            let caseLevelLabel = NSTextField(frame: NSRect(x: currentX + 16, y: 0, width: 50, height: 20))
+                            let caseLevelLabel = NSTextField(frame: NSRect(x: currentX + 14, y: 0, width: 50, height: 20))
                             caseLevelLabel.stringValue = "\(caseLevel)%"
                             caseLevelLabel.isBezeled = false
                             caseLevelLabel.isEditable = false
