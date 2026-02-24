@@ -2736,10 +2736,8 @@ class StatusBarManager {
                     
                     // 如果是自动弹出的气泡，5秒后自动关闭
                     if autoClose {
-                        print("设置自动关闭气泡，5秒后执行")
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
                             if popover.isShown {
-                                print("自动关闭气泡")
                                 popover.performClose(nil)
                             }
                         }
