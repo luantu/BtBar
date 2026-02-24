@@ -5,6 +5,14 @@ import CoreBluetooth
 import UserNotifications
 import IOBluetooth
 
+// 全局工具函数
+func localTimeString() -> String {
+    let dateFormatter = DateFormatter()
+    dateFormatter.timeZone = TimeZone.current
+    dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss z"
+    return dateFormatter.string(from: Date())
+}
+
 @main
 struct BtBarApp: App {
     static let bluetoothManager = BluetoothManager()
@@ -97,7 +105,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
     }
     
     private func setupBluetoothNotifications() {
-        let timestamp = Date()
+        let timestamp = localTimeString()
         print("\n=== Setting up Bluetooth notifications ===")
         print("Timestamp: \(timestamp)")
         
@@ -125,7 +133,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
             object: nil,
             queue: nil
         ) { [weak self] notification in
-            let timestamp = Date()
+            let timestamp = localTimeString()
             print("\n=== IOBluetoothDeviceConnectedNotification received ===")
             print("Timestamp: \(timestamp)")
             print("Notification: \(notification)")
@@ -155,7 +163,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
             object: nil,
             queue: nil
         ) { [weak self] notification in
-            let timestamp = Date()
+            let timestamp = localTimeString()
             print("\n=== IOBluetoothDeviceDisconnectedNotification received ===")
             print("Timestamp: \(timestamp)")
             print("Notification: \(notification)")
@@ -191,7 +199,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
             object: nil,
             queue: nil
         ) { [weak self] notification in
-            let timestamp = Date()
+            let timestamp = localTimeString()
             print("\n=== IOBluetoothDeviceDisconnectNotification received ===")
             print("Timestamp: \(timestamp)")
             print("Notification: \(notification)")
@@ -224,7 +232,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
             object: nil,
             queue: nil
         ) { [weak self] notification in
-            let timestamp = Date()
+            let timestamp = localTimeString()
             print("\n=== IOBluetoothDeviceDestroyedNotification received ===")
             print("Timestamp: \(timestamp)")
             print("Notification: \(notification)")
@@ -296,7 +304,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
         ) {[weak self] notification in
             let name = notification.name.rawValue
             if name.contains("Bluetooth") || name.contains("IOBluetooth") {
-                let timestamp = Date()
+                let timestamp = localTimeString()
                 print("[\(timestamp)] Bluetooth-related notification: \(name)")
                 print("[\(timestamp)] Notification object: \(notification.object ?? "nil")")
                 print("[\(timestamp)] Notification userInfo: \(notification.userInfo ?? [:])")
@@ -322,7 +330,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
             object: nil,
             queue: nil
         ) { [weak self] notification in
-            let timestamp = Date()
+            let timestamp = localTimeString()
             print("\n=== IOBluetoothDevicePublishedNotification received ===")
             print("Timestamp: \(timestamp)")
             print("Notification: \(notification)")
@@ -358,7 +366,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
             object: nil,
             queue: nil
         ) { [weak self] notification in
-            let timestamp = Date()
+            let timestamp = localTimeString()
             print("\n=== IOBluetoothDeviceConnectNotification received ===")
             print("Timestamp: \(timestamp)")
             print("Notification: \(notification)")
@@ -388,7 +396,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
             object: nil,
             queue: nil
         ) { [weak self] notification in
-            let timestamp = Date()
+            let timestamp = localTimeString()
             print("\n=== IOBluetoothDeviceConnectionNotification received ===")
             print("Timestamp: \(timestamp)")
             print("Notification: \(notification)")
@@ -418,7 +426,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
             object: nil,
             queue: nil
         ) { [weak self] notification in
-            let timestamp = Date()
+            let timestamp = localTimeString()
             print("\n=== IOBluetoothDeviceLinkUpNotification received ===")
             print("Timestamp: \(timestamp)")
             print("Notification: \(notification)")
@@ -448,7 +456,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
             object: nil,
             queue: nil
         ) { [weak self] notification in
-            let timestamp = Date()
+            let timestamp = localTimeString()
             print("\n=== IOBluetoothDeviceReadyNotification received ===")
             print("Timestamp: \(timestamp)")
             print("Notification: \(notification)")
@@ -496,7 +504,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
     
     private func startRefreshTimer() {
         print("\n=== Starting refresh timer ===")
-        print("Current time: \(Date())")
+        print("Current time: \(localTimeString())")
         
         // 取消现有的定时器
         if refreshTimer != nil {
@@ -510,7 +518,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
         print("Creating new refresh timer with 60-second interval")
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] timer in
             print("\n=== Refresh timer fired ===")
-            print("Current time: \(Date())")
+            print("Current time: \(localTimeString())")
             print("Timer valid: \(timer.isValid)")
             self?.retrieveConnectedDevices()
             print("Refresh timer task completed")
@@ -523,7 +531,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
     
     func stopRefreshTimer() {
         print("\n=== Stopping refresh timer ===")
-        print("Current time: \(Date())")
+        print("Current time: \(localTimeString())")
         
         if refreshTimer != nil {
             print("Cancelling refresh timer")
@@ -537,7 +545,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
     }
     
     public func retrieveConnectedDevices(completion: (() -> Void)? = nil) {
-        let timestamp = Date()
+        let timestamp = localTimeString()
         print("\n=== retrieveConnectedDevices() started ===")
         print("Timestamp: \(timestamp)")
         print("Current devices count: \(devices.count)")
@@ -625,7 +633,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
             print("New devices count: \(newDevices.count)")
             
             DispatchQueue.main.async {
-                let updateTimestamp = Date()
+                let updateTimestamp = localTimeString()
                 print("[\(updateTimestamp)] Updating devices list in main queue...")
                 
                 // 计算状态变化
@@ -675,7 +683,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
             print("No paired devices found")
             // 没有配对设备时，清空设备列表
             DispatchQueue.main.async {
-                let updateTimestamp = Date()
+                let updateTimestamp = localTimeString()
                 print("[\(updateTimestamp)] Clearing devices list - no paired devices found")
                 self.devices.removeAll()
                 print("[\(updateTimestamp)] Devices list cleared")
@@ -725,23 +733,17 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
             return
         }
         
-        // 尝试通过 CoreBluetooth 连接
-        if let peripheralUUID = UUID(uuidString: device.id), let peripheral = peripherals.first(where: { $0.identifier == peripheralUUID }) {
-            print("Attempting to connect to device: \(device.name)")
+        // 尝试通过 IOBluetooth 框架连接
+        if let bluetoothDevice = IOBluetoothDevice(addressString: device.id) {
+            print("Attempting to connect to device: \(device.name) using IOBluetooth")
             
             // 记录连接尝试
             let attempts = connectionAttempts[device.id] ?? 0
             connectionAttempts[device.id] = attempts + 1
             
-            // 设置连接选项
-            let connectionOptions: [String: Any] = [
-                CBConnectPeripheralOptionNotifyOnConnectionKey: true,
-                CBConnectPeripheralOptionNotifyOnDisconnectionKey: true,
-                CBConnectPeripheralOptionNotifyOnNotificationKey: true
-            ]
-            
             // 开始连接
-            centralManager.connect(peripheral, options: connectionOptions)
+            let success = bluetoothDevice.openConnection()
+            print("Connection attempt result: \(success)")
             
             // 设置连接超时
             DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
@@ -764,8 +766,8 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
                 }
             }
         } else {
-            // 如果没有找到外设，尝试重新扫描
-            print("Peripheral not found for device: \(device.name), starting scan...")
+            // 如果没有找到设备，尝试重新扫描
+            print("Device not found: \(device.name), starting scan...")
             startScanning()
             
             // 扫描后再次尝试连接
@@ -782,15 +784,15 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
             return
         }
         
-        // 尝试通过 CoreBluetooth 断开连接
-        if let peripheralUUID = UUID(uuidString: device.id), let peripheral = peripherals.first(where: { $0.identifier == peripheralUUID }) {
-            print("Attempting to disconnect from device: \(device.name)")
-            centralManager.cancelPeripheralConnection(peripheral)
+        // 尝试通过 IOBluetooth 框架断开连接
+        if let bluetoothDevice = IOBluetoothDevice(addressString: device.id) {
+            print("Attempting to disconnect from device: \(device.name) using IOBluetooth")
+            bluetoothDevice.closeConnection()
             
             // 重置连接尝试计数
             connectionAttempts[device.id] = 0
         } else {
-            print("Peripheral not found for device: \(device.name)")
+            print("Device not found: \(device.name)")
         }
     }
     
@@ -929,7 +931,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
     // MARK: - CBCentralManagerDelegate
     
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
-        let timestamp = Date()
+        let timestamp = localTimeString()
         print("\n=== Bluetooth state changed ===")
         print("Timestamp: \(timestamp)")
         
@@ -938,7 +940,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
             print("Bluetooth is on")
             // 当蓝牙开启时，立即开始扫描
             DispatchQueue.main.async {
-                print("[\(Date())] Starting Bluetooth device scan...")
+                print("[\(localTimeString())] Starting Bluetooth device scan...")
                 self.startScanning()
             }
         case .poweredOff:
@@ -964,12 +966,12 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
         // 检查是否已经添加过该设备
         if !peripherals.contains(where: { $0.identifier == peripheral.identifier }) {
             peripherals.append(peripheral)
-            print("[\(Date())] Peripheral discovered: \(name)")
+            print("[\(localTimeString())] Peripheral discovered: \(name)")
         }
     }
     
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        let timestamp = Date()
+        let timestamp = localTimeString()
         print("\n=== Device connected ===")
         print("Timestamp: \(timestamp)")
         print("Peripheral connected: \(peripheral.name ?? "Unknown") - \(peripheral.identifier.uuidString)")
@@ -977,7 +979,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
         // 更新设备连接状态
         DispatchQueue.main.async {
             if let index = self.devices.firstIndex(where: { $0.id == peripheral.identifier.uuidString }) {
-                print("[\(Date())] Updating device state for: \(self.devices[index].name)")
+                print("[\(localTimeString())] Updating device state for: \(self.devices[index].name)")
                 self.devices[index].isConnected = true
                 // 尝试获取真实电量，失败则使用默认值
                 var batteryLevel: Int
@@ -1002,22 +1004,22 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
                     }
                 }
                 self.devices[index].batteryLevel = batteryLevel
-                print("[\(Date())] Device \(self.devices[index].name) connected with battery: \(batteryLevel)%")
+                print("[\(localTimeString())] Device \(self.devices[index].name) connected with battery: \(batteryLevel)%")
                 
                 // 检查是否需要发送低电量提醒
                 self.checkBatteryLevel(for: self.devices[index])
                 
                 // 设备连接后会通过状态监听自动更新状态栏
-                print("[\(Date())] Device connected, status bar will be updated via listener")
+                print("[\(localTimeString())] Device connected, status bar will be updated via listener")
             } else {
-                print("[\(Date())] Device not found in devices list")
+                print("[\(localTimeString())] Device not found in devices list")
             }
         }
         print("========================")
     }
     
     private func checkBatteryLevel(for device: BluetoothDevice) {
-        let timestamp = Date()
+        let timestamp = localTimeString()
         print("[\(timestamp)] Checking battery level for: \(device.name)")
         // 检查设备电量并发送低电量提醒
         if let batteryLevel = device.batteryLevel, batteryLevel < 20 {
@@ -1027,7 +1029,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
     }
     
     private func sendLowBatteryNotification(for device: BluetoothDevice) {
-        let timestamp = Date()
+        let timestamp = localTimeString()
         print("[\(timestamp)] Sending low battery notification for: \(device.name)")
         // 检查是否在支持的环境中运行
         if Bundle.main.bundlePath != "" && Bundle.main.bundleIdentifier != nil {
@@ -1047,16 +1049,16 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
             let center = UNUserNotificationCenter.current()
             center.add(request) { error in
                 if let error = error {
-                    print("[\(Date())] Error sending notification: \(error)")
-                } else {
-                    print("[\(Date())] Notification sent successfully")
-                }
+                        print("[\(localTimeString())] Error sending notification: \(error)")
+                    } else {
+                        print("[\(localTimeString())] Notification sent successfully")
+                    }
             }
         }
     }
     
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
-        let timestamp = Date()
+        let timestamp = localTimeString()
         print("\n=== CBCentralManager didDisconnectPeripheral ===")
         print("Timestamp: \(timestamp)")
         print("Peripheral name: \(peripheral.name ?? "Unknown")")
@@ -1078,7 +1080,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
         // 更新设备断开状态
         print("Updating device state in main queue...")
         DispatchQueue.main.async {
-            let updateTimestamp = Date()
+            let updateTimestamp = localTimeString()
             print("[\(updateTimestamp)] Main queue update started")
             
             if let index = self.devices.firstIndex(where: { $0.id == peripheral.identifier.uuidString }) {
@@ -1112,7 +1114,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
     
     // 添加连接错误处理
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
-        let timestamp = Date()
+        let timestamp = localTimeString()
         print("\n=== Connection failed ===")
         print("Timestamp: \(timestamp)")
         print("Failed to connect to: \(peripheral.name ?? "Unknown") - \(peripheral.identifier.uuidString)")
@@ -1205,7 +1207,7 @@ class StatusBarManager {
             object: nil,
             queue: nil
         ) { [weak self] notification in
-            let timestamp = Date()
+            let timestamp = localTimeString()
             print("[\(timestamp)] BluetoothDevicesUpdatedNotification received in StatusBarManager")
             if let devices = notification.userInfo?["devices"] as? [BluetoothDevice] {
                 print("[\(timestamp)] Updating status items with \(devices.count) devices")
@@ -1243,7 +1245,7 @@ class StatusBarManager {
     internal func updateStatusItems(devices: [BluetoothDevice]) {
         // 确保在主队列中执行
         DispatchQueue.main.async {
-            let timestamp = Date()
+            let timestamp = localTimeString()
             print("[\(timestamp)] === 更新状态栏图标 ===")
             print("[\(timestamp)] 当前设备数量: \(devices.count)")
             print("[\(timestamp)] 当前状态栏图标数量: \(self.statusItems.count)")
@@ -1263,16 +1265,23 @@ class StatusBarManager {
                 if let button = appStatusItem?.button {
                     // 使用自定义应用图标
                     if let customImage = self.getCustomIcon() {
+                        // 确保自定义图标不使用模板模式，保持原始白色
+                        customImage.isTemplate = false
                         button.image = customImage
                         print("[\(timestamp)] 使用自定义应用图标")
                     } else {
                         // 如果自定义图标不可用，使用系统图标
                         if let image = NSImage(systemSymbolName: "bluetooth", accessibilityDescription: "Bluetooth") {
+                            // 确保系统图标不使用模板模式，保持原始白色
+                            image.isTemplate = false
                             button.image = image
                             print("[\(timestamp)] 使用系统应用图标")
                         } else {
                             // 如果系统图标也不可用，使用随机图标
-                            button.image = self.generateRandomIcon()
+                            let randomIcon = self.generateRandomIcon()
+                            // 确保随机图标不使用模板模式，保持原始颜色
+                            randomIcon.isTemplate = false
+                            button.image = randomIcon
                             print("[\(timestamp)] 使用随机应用图标")
                         }
                     }
@@ -1358,19 +1367,24 @@ class StatusBarManager {
                 
                 if let button = deviceStatusItem.button {
                     // 确保按钮大小正确
-                    button.frame = NSRect(x: 0, y: 0, width: 20, height: 20)
+                    button.frame = NSRect(x: 0, y: 0, width: 18, height: 18)
                     
                     // 使用可复用的方法获取设备图标
                     if let deviceIcon = self.getDeviceIcon(for: device, size: NSSize(width: 16, height: 16), applyTemplateForDisconnected: false) {
                         // 确保图片大小正确
                         deviceIcon.size = NSSize(width: 16, height: 16)
+                        // 确保图标不使用模板模式，保持原始白色
+                        deviceIcon.isTemplate = false
                         button.image = deviceIcon
                         // 确保图片显示模式正确
                         button.imageScaling = .scaleProportionallyUpOrDown
                         print("[\(timestamp)] 在状态栏显示设备图标: \(device.name)")
                     } else {
                         // 如果所有图标都不可用，使用随机图标
-                        button.image = self.generateRandomIcon()
+                        let randomIcon = self.generateRandomIcon()
+                        // 确保随机图标不使用模板模式，保持原始颜色
+                        randomIcon.isTemplate = false
+                        button.image = randomIcon
                         print("[\(timestamp)] 使用随机图标为设备: \(device.name)")
                     }
                     
@@ -1392,8 +1406,8 @@ class StatusBarManager {
                     print("[\(timestamp)] 设备刚刚连接，自动弹出气泡详情: \(device.name)")
                     // 延迟一点时间，确保图标已经完全创建
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        // 模拟点击状态栏图标，触发气泡显示
-                        self.showDeviceDetailsForDevice(device)
+                        // 模拟点击状态栏图标，触发气泡显示，并设置5秒后自动关闭
+                        self.showDeviceDetailsForDevice(device, autoClose: true)
                     }
                 }
             }
@@ -1465,10 +1479,8 @@ class StatusBarManager {
             if let image = NSImage(contentsOfFile: customIconPath) {
                 // 缩放图片到指定大小
                 let scaledImage = scaleImage(image, toSize: size)
-                // 为未连接设备添加暗淡效果
-                if applyTemplateForDisconnected && !device.isConnected {
-                    scaledImage.isTemplate = true
-                }
+                // 始终设置为模板图片，确保在深色模式下正确显示
+                scaledImage.isTemplate = true
                 return scaledImage
             } else {
                 print("无法读取用户选择的图片文件: \(customIconPath)")
@@ -1480,19 +1492,16 @@ class StatusBarManager {
         if let image = NSImage(systemSymbolName: systemIconName, accessibilityDescription: device.name) {
             // 缩放系统图标到指定大小
             let scaledImage = scaleImage(image, toSize: size)
-            // 为未连接设备添加暗淡效果
-            if applyTemplateForDisconnected && !device.isConnected {
-                scaledImage.isTemplate = true
-            }
+            // 始终设置为模板图片，确保在深色模式下正确显示
+            scaledImage.isTemplate = true
             return scaledImage
         }
         
         // 如果系统图标也不可用，使用应用图标
         if let customImage = getCustomIcon() {
             let scaledImage = scaleImage(customImage, toSize: size)
-            if applyTemplateForDisconnected && !device.isConnected {
-                scaledImage.isTemplate = true
-            }
+            // 始终设置为模板图片，确保在深色模式下正确显示
+            scaledImage.isTemplate = true
             return scaledImage
         }
         
@@ -1574,12 +1583,12 @@ class StatusBarManager {
         cachedMenu = nil
         
         // 首先同步获取最新的设备状态，然后再创建菜单
-        print("[\(Date())] showDeviceMenu - Started, refreshing device status...")
+        print("[\(localTimeString())] showDeviceMenu - Started, refreshing device status...")
         
         // 直接使用IOBluetoothDevice的isConnected()方法来检查设备的实时连接状态
         // 这样可以确保获取到最新的设备连接状态，而不依赖于bluetoothManager.devices中的缓存状态
         if let devicesArray = IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice] {
-            print("[\(Date())] Found \(devicesArray.count) paired devices")
+            print("[\(localTimeString())] Found \(devicesArray.count) paired devices")
             
             // 创建新菜单
             let menu = NSMenu()
@@ -1651,12 +1660,12 @@ class StatusBarManager {
                 }
             }
             
-            print("[\(Date())] Menu creation - Connected devices: \(connectedDevices.count), Disconnected devices: \(disconnectedDevices.count)")
+            print("[\(localTimeString())] Menu creation - Connected devices: \(connectedDevices.count), Disconnected devices: \(disconnectedDevices.count)")
             for device in connectedDevices {
-                print("[\(Date())] Connected device: \(device.name), ID: \(device.id)")
+                print("[\(localTimeString())] Connected device: \(device.name), ID: \(device.id)")
             }
             for device in disconnectedDevices {
-                print("[\(Date())] Disconnected device: \(device.name), ID: \(device.id)")
+                print("[\(localTimeString())] Disconnected device: \(device.name), ID: \(device.id)")
             }
             
             // 先添加已连接的设备
@@ -1747,10 +1756,10 @@ class StatusBarManager {
             // 同时更新bluetoothManager.devices，确保其他地方也能获取到最新的设备状态
             bluetoothManager.retrieveConnectedDevices()
             
-            print("[\(Date())] showDeviceMenu - Completed")
+            print("[\(localTimeString())] showDeviceMenu - Completed")
         } else {
             // 没有配对设备时
-            print("[\(Date())] No paired devices found")
+            print("[\(localTimeString())] No paired devices found")
             
             // 创建新菜单
             let menu = NSMenu()
@@ -1827,7 +1836,7 @@ class StatusBarManager {
             // 同时更新bluetoothManager.devices，确保其他地方也能获取到最新的设备状态
             bluetoothManager.retrieveConnectedDevices()
             
-            print("[\(Date())] showDeviceMenu - Completed")
+            print("[\(localTimeString())] showDeviceMenu - Completed")
         }
     }
     
@@ -2058,7 +2067,8 @@ class StatusBarManager {
                     return
                 }
                 
-                let iconFileName = "device_\(device.id).png"
+                let timestamp = Int(Date().timeIntervalSince1970)
+                let iconFileName = "device_\(device.id)_\(timestamp).png"
                 let iconPath = tempDir.appending(iconFileName)
                 
                 // 将图片保存为PNG格式
@@ -2210,12 +2220,13 @@ class StatusBarManager {
         }
     }
     
-    private func showDeviceDetailsForDevice(_ device: BluetoothDevice) {
+    private func showDeviceDetailsForDevice(_ device: BluetoothDevice, autoClose: Bool = false) {
         // 显示设备详情信息
         print("显示设备详情信息: \(device.name)")
         print("已连接: \(device.isConnected)")
         print("电量: \(device.batteryLevel ?? 0)%")
         print("自定义图标: \(device.customIconName ?? "无")")
+        print("自动关闭: \(autoClose)")
         
         // 确保应用程序处于活动状态
         NSApp.activate(ignoringOtherApps: true)
@@ -2250,6 +2261,8 @@ class StatusBarManager {
                     let iconImageView = NSImageView(frame: NSRect(x: 12, y: 95, width: 28, height: 28)) // 调整位置和大小，整体向上移动
                     // 使用可复用的方法获取设备图标
                     if let deviceIcon = self.getDeviceIcon(for: device, size: NSSize(width: 28, height: 28), applyTemplateForDisconnected: false) {
+                        // 确保图标不使用模板模式，保持原始白色
+                        deviceIcon.isTemplate = false
                         iconImageView.image = deviceIcon
                     }
                     visualEffectView.addSubview(iconImageView)
@@ -2349,6 +2362,17 @@ class StatusBarManager {
                     
                     // 更新设备状态栏图标映射，存储气泡
                     self.deviceStatusItems[deviceID] = (statusItem: deviceInfo.statusItem, device: device, popover: popover)
+                    
+                    // 如果是自动弹出的气泡，5秒后自动关闭
+                    if autoClose {
+                        print("设置自动关闭气泡，5秒后执行")
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
+                            if popover.isShown {
+                                print("自动关闭气泡")
+                                popover.performClose(nil)
+                            }
+                        }
+                    }
                     
                     // 添加全局点击监听器，确保点击外部时关闭弹窗
                     NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak popover] event in
