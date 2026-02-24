@@ -35,8 +35,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         bluetoothManager.startScanning()
         
         // 监听蓝牙状态变化
-        NotificationCenter.default.addObserver(forName: NSNotification.Name("CBCentralManagerStateChangedNotification"), object: nil, queue: nil) {[weak self] notification in
-            guard let self = self else { return }
+        NotificationCenter.default.addObserver(forName: NSNotification.Name("CBCentralManagerStateChangedNotification"), object: nil, queue: nil) { notification in
             let bluetoothManager = BtBarApp.bluetoothManager
             if bluetoothManager.centralManager.state == .poweredOn {
                 bluetoothManager.startScanning()
@@ -47,17 +46,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func requestNotificationPermission() {
         // 检查是否在支持的环境中运行
         if Bundle.main.bundlePath != "" && Bundle.main.bundleIdentifier != nil {
-            do {
-                let center = UNUserNotificationCenter.current()
-                center.requestAuthorization(options: [.alert, .sound]) { (granted, error) in
-                    if granted {
-                        print("Notification permission granted")
-                    } else if let error = error {
-                        print("Error requesting notification permission: \(error)")
-                    }
+            let center = UNUserNotificationCenter.current()
+            center.requestAuthorization(options: [.alert, .sound]) { (granted, error) in
+                if granted {
+                    print("Notification permission granted")
+                } else if let error = error {
+                    print("Error requesting notification permission: \(error)")
                 }
-            } catch {
-                print("Notification center not available in this environment")
             }
         }
     }
@@ -924,12 +919,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
         
         // 设置定时器，定期检查连接状态
         var timer: Timer?
-        timer = Timer.scheduledTimer(withTimeInterval: checkInterval, repeats: true) { [weak self] _ in
-            guard let self = self else { 
-                timer?.invalidate()
-                return 
-            }
-            
+        timer = Timer.scheduledTimer(withTimeInterval: checkInterval, repeats: true) { _ in
             if checkConnectionStatus() {
                 timer?.invalidate()
             }
@@ -967,7 +957,6 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
     }
     
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String : Any], rssi RSSI: NSNumber) {
-        let timestamp = Date()
         // 增加详细的调试信息
         let name = peripheral.name ?? "Unknown Device"
         // 屏蔽设备发现的详细日志
@@ -1042,30 +1031,26 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
         print("[\(timestamp)] Sending low battery notification for: \(device.name)")
         // 检查是否在支持的环境中运行
         if Bundle.main.bundlePath != "" && Bundle.main.bundleIdentifier != nil {
-            do {
-                // 创建通知内容
-                let content = UNMutableNotificationContent()
-                content.title = "Low Battery"
-                content.body = "\(device.name) battery is running low: \(device.batteryLevel ?? 0)%"
-                content.sound = UNNotificationSound.default
-                
-                // 创建通知触发器
-                let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
-                
-                // 创建通知请求
-                let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: trigger)
-                
-                // 添加通知请求
-                let center = UNUserNotificationCenter.current()
-                center.add(request) { error in
-                    if let error = error {
-                        print("[\(Date())] Error sending notification: \(error)")
-                    } else {
-                        print("[\(Date())] Notification sent successfully")
-                    }
+            // 创建通知内容
+            let content = UNMutableNotificationContent()
+            content.title = "Low Battery"
+            content.body = "\(device.name) battery is running low: \(device.batteryLevel ?? 0)%"
+            content.sound = UNNotificationSound.default
+            
+            // 创建通知触发器
+            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+            
+            // 创建通知请求
+            let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: trigger)
+            
+            // 添加通知请求
+            let center = UNUserNotificationCenter.current()
+            center.add(request) { error in
+                if let error = error {
+                    print("[\(Date())] Error sending notification: \(error)")
+                } else {
+                    print("[\(Date())] Notification sent successfully")
                 }
-            } catch {
-                print("[\(timestamp)] Notification center not available in this environment")
             }
         }
     }
@@ -1178,6 +1163,15 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
     }
 }
 
+// 窗口代理类
+class WindowDelegate: NSObject, NSWindowDelegate {
+    weak var statusBarManager: StatusBarManager?
+    
+    func windowWillClose(_ notification: Notification) {
+        statusBarManager?.cleanupSettingsWindow()
+    }
+}
+
 // 状态栏管理器
 class StatusBarManager {
     private var statusItems: [NSStatusItem] = []
@@ -1187,6 +1181,8 @@ class StatusBarManager {
     private var showDeviceIcons: [String: Bool] = [:] // 存储设备图标显示设置
     private var lastDeviceStates: [String: (isConnected: Bool, customIconName: String?, batteryLevel: Int?)] = [:] // 存储设备的最后状态
     private var settingsWindow: NSWindow? // 存储设置窗口引用，避免被释放
+    private var settingsWindowDelegate: WindowDelegate? // 存储窗口代理引用，确保生命周期与窗口一致
+    private var settingsHostingController: NSViewController? // 存储设置窗口的hosting controller引用
     
     init(bluetoothManager: BluetoothManager) {
         self.bluetoothManager = bluetoothManager
@@ -1590,6 +1586,8 @@ class StatusBarManager {
             // 设置菜单外观为暗色，确保与气泡背景一致
             menu.appearance = NSAppearance(named: .darkAqua)
             
+            // 移除背景修改代码，确保菜单能够正常弹出
+            
             // 分离已连接和未连接的设备
             var connectedDevices: [BluetoothDevice] = []
             var disconnectedDevices: [BluetoothDevice] = []
@@ -1688,19 +1686,49 @@ class StatusBarManager {
             }
             
             // 添加设置项
-            if let settingsImage = NSImage(systemSymbolName: "gear", accessibilityDescription: "Settings") {
-                let settingsItem = createMenuItemWithVisualEffect(title: "Settings", action: #selector(self.openSettings), keyEquivalent: "", image: settingsImage, target: self)
-                menu.addItem(settingsItem)
-            }
+            // 暂时屏蔽设置菜单以避免崩溃
+            // if let settingsImage = NSImage(systemSymbolName: "gear", accessibilityDescription: "Settings") {
+            //     let settingsItem = createMenuItemWithVisualEffect(title: "Settings", action: #selector(self.openSettings), keyEquivalent: "", image: settingsImage, target: self)
+            //     menu.addItem(settingsItem)
+            // }
             
             // 添加退出项
-            if let quitImage = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Quit") {
-                let quitItem = createMenuItemWithVisualEffect(title: "Quit", action: #selector(self.quitApp), keyEquivalent: "", image: quitImage, target: self)
+            if let quitImage = NSImage(systemSymbolName: "power", accessibilityDescription: "Quit") {
+                let quitItem = NSMenuItem(title: "", action: #selector(self.quitApp), keyEquivalent: "")
+                quitItem.target = self
+                quitItem.image = quitImage
+                quitItem.isEnabled = true
+                // 创建自定义视图来控制图标的位置
+                let quitView = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 32))
+                quitView.wantsLayer = true
+                quitView.layer?.backgroundColor = NSColor.clear.cgColor
+                
+                // 创建图标按钮
+                let quitButton = HoverableButton(frame: NSRect(x: 170, y: 4, width: 24, height: 24))
+                quitButton.setButtonType(.momentaryPushIn)
+                quitButton.bezelStyle = .texturedRounded
+                quitButton.image = quitImage
+                quitButton.target = self
+                quitButton.action = #selector(self.quitApp)
+                quitButton.isBordered = false
+                quitButton.wantsLayer = true
+                quitButton.layer?.backgroundColor = NSColor.clear.cgColor
+                // 添加鼠标跟踪区域
+                let trackingArea = NSTrackingArea(
+                    rect: quitButton.bounds,
+                    options: [.mouseEnteredAndExited, .activeAlways],
+                    owner: quitButton,
+                    userInfo: nil
+                )
+                quitButton.addTrackingArea(trackingArea)
+                quitView.addSubview(quitButton)
+                
+                quitItem.view = quitView
                 menu.addItem(quitItem)
             }
             
             // 添加带有毛玻璃效果的空白菜单项，覆盖菜单底部边缘
-            menu.addItem(createVisualEffectSpacer())
+            // menu.addItem(createVisualEffectSpacer())
             
             // 缓存菜单
             self.cachedMenu = menu
@@ -1709,10 +1737,11 @@ class StatusBarManager {
             // 显示菜单
             if let statusItem = self.statusItems.first, let button = statusItem.button {
                 // 直接弹出菜单，不设置statusItem.menu属性，避免系统缓存菜单对象
-                menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height), in: button)
+                // 向左移动20个像素，向下移动10个像素
+                menu.popUp(positioning: nil, at: NSPoint(x: -20, y: button.bounds.height + 10), in: button)
             } else {
                 // 如果按钮不可用，使用默认位置
-                menu.popUp(positioning: nil, at: NSPoint(x: 0, y: 0), in: nil)
+                menu.popUp(positioning: nil, at: NSPoint(x: -20, y: 10), in: nil)
             }
             
             // 同时更新bluetoothManager.devices，确保其他地方也能获取到最新的设备状态
@@ -1728,6 +1757,8 @@ class StatusBarManager {
             // 设置菜单外观为暗色，确保与气泡背景一致
             menu.appearance = NSAppearance(named: .darkAqua)
             
+            // 移除背景修改代码，确保菜单能够正常弹出
+            
             // 添加无设备提示
             let noDevicesItem = NSMenuItem(title: "No paired Bluetooth devices found", action: nil, keyEquivalent: "")
             noDevicesItem.isEnabled = false
@@ -1735,14 +1766,44 @@ class StatusBarManager {
             menu.addItem(createVisualEffectSeparator())
             
             // 添加设置项
-            if let settingsImage = NSImage(systemSymbolName: "gear", accessibilityDescription: "Settings") {
-                let settingsItem = createMenuItemWithVisualEffect(title: "Settings", action: #selector(self.openSettings), keyEquivalent: "", image: settingsImage, target: self)
-                menu.addItem(settingsItem)
-            }
+            // 暂时屏蔽设置菜单以避免崩溃
+            // if let settingsImage = NSImage(systemSymbolName: "gear", accessibilityDescription: "Settings") {
+            //     let settingsItem = createMenuItemWithVisualEffect(title: "Settings", action: #selector(self.openSettings), keyEquivalent: "", image: settingsImage, target: self)
+            //     menu.addItem(settingsItem)
+            // }
             
             // 添加退出项
-            if let quitImage = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Quit") {
-                let quitItem = createMenuItemWithVisualEffect(title: "Quit", action: #selector(self.quitApp), keyEquivalent: "", image: quitImage, target: self)
+            if let quitImage = NSImage(systemSymbolName: "power", accessibilityDescription: "Quit") {
+                let quitItem = NSMenuItem(title: "", action: #selector(self.quitApp), keyEquivalent: "")
+                quitItem.target = self
+                quitItem.image = quitImage
+                quitItem.isEnabled = true
+                // 创建自定义视图来控制图标的位置
+                let quitView = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 32))
+                quitView.wantsLayer = true
+                quitView.layer?.backgroundColor = NSColor.clear.cgColor
+                
+                // 创建图标按钮
+                let quitButton = HoverableButton(frame: NSRect(x: 170, y: 4, width: 24, height: 24))
+                quitButton.setButtonType(.momentaryPushIn)
+                quitButton.bezelStyle = .texturedRounded
+                quitButton.image = quitImage
+                quitButton.target = self
+                quitButton.action = #selector(self.quitApp)
+                quitButton.isBordered = false
+                quitButton.wantsLayer = true
+                quitButton.layer?.backgroundColor = NSColor.clear.cgColor
+                // 添加鼠标跟踪区域
+                let trackingArea = NSTrackingArea(
+                    rect: quitButton.bounds,
+                    options: [.mouseEnteredAndExited, .activeAlways],
+                    owner: quitButton,
+                    userInfo: nil
+                )
+                quitButton.addTrackingArea(trackingArea)
+                quitView.addSubview(quitButton)
+                
+                quitItem.view = quitView
                 menu.addItem(quitItem)
             }
             
@@ -1756,10 +1817,11 @@ class StatusBarManager {
             // 显示菜单
             if let statusItem = self.statusItems.first, let button = statusItem.button {
                 // 直接弹出菜单，不设置statusItem.menu属性，避免系统缓存菜单对象
-                menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height), in: button)
+                // 向左移动20个像素，向下移动10个像素
+                menu.popUp(positioning: nil, at: NSPoint(x: -20, y: button.bounds.height + 10), in: button)
             } else {
                 // 如果按钮不可用，使用默认位置
-                menu.popUp(positioning: nil, at: NSPoint(x: 0, y: 0), in: nil)
+                menu.popUp(positioning: nil, at: NSPoint(x: -20, y: 10), in: nil)
             }
             
             // 同时更新bluetoothManager.devices，确保其他地方也能获取到最新的设备状态
@@ -1769,67 +1831,110 @@ class StatusBarManager {
         }
     }
     
+    // 带鼠标悬停效果的视图子类
+    private class HoverableView: NSView {
+        override func mouseEntered(with event: NSEvent) {
+            super.mouseEntered(with: event)
+            // 使用选中颜色以获得更高对比度
+            self.layer?.backgroundColor = NSColor.selectedControlColor.withAlphaComponent(0.6).cgColor
+        }
+        
+        override func mouseExited(with event: NSEvent) {
+            super.mouseExited(with: event)
+            self.layer?.backgroundColor = NSColor.clear.cgColor
+        }
+    }
+    
+    // 带鼠标悬停效果的按钮子类
+    private class HoverableButton: NSButton {
+        static var lastClickLocation: NSPoint?
+        
+        override func mouseDown(with event: NSEvent) {
+            super.mouseDown(with: event)
+            // 捕获鼠标点击位置
+            let clickLocation = convert(event.locationInWindow, from: nil)
+            // 转换为屏幕坐标
+            let windowLocation = window?.convertPoint(toScreen: clickLocation) ?? clickLocation
+            HoverableButton.lastClickLocation = windowLocation
+        }
+        
+        override func mouseEntered(with event: NSEvent) {
+            super.mouseEntered(with: event)
+            self.layer?.backgroundColor = NSColor.selectedControlColor.withAlphaComponent(0.6).cgColor
+        }
+        
+        override func mouseExited(with event: NSEvent) {
+            super.mouseExited(with: event)
+            self.layer?.backgroundColor = NSColor.clear.cgColor
+        }
+    }
+    
     private func addDeviceMenuItem(to menu: NSMenu, device: BluetoothDevice) {
-        // 创建紧凑的设备菜单项
+        // 创建设备菜单项
         let deviceItem = NSMenuItem(title: "", action: #selector(handleDeviceItemClick(_:)), keyEquivalent: "")
         deviceItem.target = self
         deviceItem.representedObject = device // 设置 representedObject 以便后续检测状态变化
         
-        // 创建设备信息视图 - 更紧凑的布局
-            let deviceView = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: 220, height: 36))
-            deviceView.wantsLayer = true
-            deviceView.material = .menu // 使用与菜单相同的材质
-            deviceView.blendingMode = .withinWindow // 更改混合模式以获得更好的毛玻璃效果
-            deviceView.state = .active
-            deviceView.appearance = NSAppearance(named: .darkAqua) // 使用暗色外观，确保与菜单背景一致
+        // 创建设备信息视图
+        let deviceView = HoverableView(frame: NSRect(x: 0, y: 0, width: 200, height: 32))
+        deviceView.wantsLayer = true
+        deviceView.layer?.backgroundColor = NSColor.clear.cgColor
         
         // 添加设备图标
-        let iconImageView = NSImageView(frame: NSRect(x: 13, y: 6, width: 24, height: 24))
-        // 使用可复用的方法获取设备图标
+        let iconImageView = NSImageView(frame: NSRect(x: 8, y: 4, width: 24, height: 24))
         if let deviceIcon = getDeviceIcon(for: device, size: NSSize(width: 24, height: 24)) {
             iconImageView.image = deviceIcon
-            print("使用设备图标: \(device.name)")
         }
         deviceView.addSubview(iconImageView)
         
         // 添加设备名称
-        let nameLabel = NSTextField(frame: NSRect(x: 45, y: 8, width: 130, height: 20))
+        let nameLabel = NSTextField(frame: NSRect(x: 40, y: 0, width: 100, height: 24))
         nameLabel.stringValue = device.name
         nameLabel.isBezeled = false
         nameLabel.isEditable = false
-        // 为未连接设备添加暗淡效果
-        nameLabel.textColor = device.isConnected ? .labelColor : .secondaryLabelColor
         nameLabel.backgroundColor = .clear
+        nameLabel.textColor = device.isConnected ? .labelColor : .secondaryLabelColor
         nameLabel.font = NSFont.systemFont(ofSize: 13)
+        nameLabel.isSelectable = false
         deviceView.addSubview(nameLabel)
         
         // 添加连接状态指示器
-        let statusLabel = NSTextField(frame: NSRect(x: 185, y: 8, width: 20, height: 20))
+        let statusLabel = NSTextField(frame: NSRect(x: 140, y: 0, width: 20, height: 24))
         statusLabel.stringValue = device.isConnected ? "●" : ""
         statusLabel.isBezeled = false
         statusLabel.isEditable = false
-        statusLabel.textColor = device.isConnected ? .systemGreen : .clear
         statusLabel.backgroundColor = .clear
+        statusLabel.textColor = device.isConnected ? .systemGreen : .clear
         statusLabel.font = NSFont.systemFont(ofSize: 13)
         statusLabel.alignment = .right
+        statusLabel.isSelectable = false
         deviceView.addSubview(statusLabel)
         
         // 添加电量信息（如果有）
         if let batteryLevel = device.batteryLevel {
-            let batteryLabel = NSTextField(frame: NSRect(x: 150, y: 8, width: 40, height: 20))
+            let batteryLabel = NSTextField(frame: NSRect(x: 150, y: 0, width: 40, height: 24))
             batteryLabel.stringValue = "\(batteryLevel)%"
             batteryLabel.isBezeled = false
             batteryLabel.isEditable = false
-            batteryLabel.textColor = device.isConnected ? .labelColor : .secondaryLabelColor
             batteryLabel.backgroundColor = .clear
+            batteryLabel.textColor = device.isConnected ? .labelColor : .secondaryLabelColor
             batteryLabel.font = NSFont.systemFont(ofSize: 13)
             batteryLabel.alignment = .right
+            batteryLabel.isSelectable = false
             deviceView.addSubview(batteryLabel)
         }
         
+        // 添加鼠标悬停效果的跟踪区域
+        let trackingArea = NSTrackingArea(
+            rect: deviceView.bounds,
+            options: [.mouseEnteredAndExited, .activeAlways],
+            owner: deviceView,
+            userInfo: nil
+        )
+        deviceView.addTrackingArea(trackingArea)
+        
         deviceItem.view = deviceView
         deviceItem.submenu = createDeviceSubmenu(device: device)
-        deviceItem.representedObject = device // 设置 representedObject 以便后续检测状态变化
         menu.addItem(deviceItem)
     }
     
@@ -1837,43 +1942,26 @@ class StatusBarManager {
         let menuItem = NSMenuItem(title: title, action: action, keyEquivalent: keyEquivalent)
         menuItem.target = target
         menuItem.image = image
+        menuItem.representedObject = title
+        
+        // 设置文字大小为13
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 13),
+            .foregroundColor: NSColor.labelColor
+        ]
+        let attributedTitle = NSAttributedString(string: title, attributes: attributes)
+        menuItem.attributedTitle = attributedTitle
+        
         return menuItem
     }
     
     private func createVisualEffectSeparator() -> NSMenuItem {
-        let separatorItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-        
-        // 创建毛玻璃效果的背景视图
-        let separatorView = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: 220, height: 20))
-        separatorView.wantsLayer = true
-        separatorView.material = .menu // 使用与菜单相同的材质
-        separatorView.blendingMode = .withinWindow // 更改混合模式以获得更好的毛玻璃效果
-        separatorView.state = .active
-        separatorView.appearance = NSAppearance(named: .darkAqua) // 使用暗色外观，确保与菜单背景一致
-        
-        // 添加分割线
-        let separatorLine = NSView(frame: NSRect(x: 13, y: 9, width: 194, height: 1))
-        separatorLine.wantsLayer = true
-        separatorLine.layer?.backgroundColor = NSColor.separatorColor.cgColor
-        separatorView.addSubview(separatorLine)
-        
-        separatorItem.view = separatorView
-        separatorItem.isEnabled = false
+        let separatorItem = NSMenuItem.separator()
         return separatorItem
     }
     
     private func createVisualEffectSpacer() -> NSMenuItem {
         let spacerItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-        
-        // 创建毛玻璃效果的背景视图，增加高度以完全覆盖菜单底部边缘
-        let spacerView = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: 220, height: 10))
-        spacerView.wantsLayer = true
-        spacerView.material = .menu // 使用与菜单相同的材质
-        spacerView.blendingMode = .withinWindow // 更改混合模式以获得更好的毛玻璃效果
-        spacerView.state = .active
-        spacerView.appearance = NSAppearance(named: .darkAqua) // 使用暗色外观，确保与菜单背景一致
-        
-        spacerItem.view = spacerView
         spacerItem.isEnabled = false
         return spacerItem
     }
@@ -1944,7 +2032,7 @@ class StatusBarManager {
             openPanel.allowsMultipleSelection = false
             
             // 设置允许的文件类型
-            openPanel.allowedFileTypes = ["png", "jpg", "jpeg", "gif", "tiff"]
+            openPanel.allowedContentTypes = [.png, .jpeg, .gif, .tiff]
             
             // 定义处理文件选择的闭包
             let handleFileSelection: (URL) -> Void = { [weak self] url in
@@ -2027,7 +2115,14 @@ class StatusBarManager {
         alert.messageText = title
         alert.informativeText = message
         alert.addButton(withTitle: "OK")
-        alert.runModal()
+        
+        // 尝试使用主窗口作为父窗口显示警告
+        if let window = NSApp.mainWindow ?? NSApp.windows.first {
+            alert.beginSheetModal(for: window, completionHandler: nil)
+        } else {
+            // 如果没有主窗口，使用默认方式显示
+            alert.runModal()
+        }
     }
     
     // 显示成功警告
@@ -2036,7 +2131,14 @@ class StatusBarManager {
         alert.messageText = title
         alert.informativeText = message
         alert.addButton(withTitle: "OK")
-        alert.runModal()
+        
+        // 尝试使用主窗口作为父窗口显示警告
+        if let window = NSApp.mainWindow ?? NSApp.windows.first {
+            alert.beginSheetModal(for: window, completionHandler: nil)
+        } else {
+            // 如果没有主窗口，使用默认方式显示
+            alert.runModal()
+        }
     }
     
     @objc private func toggleDeviceStatusIcon(_ sender: NSMenuItem) {
@@ -2099,7 +2201,7 @@ class StatusBarManager {
         print("显示设备详情信息")
         
         // 找出是哪个设备的图标被点击了
-        for (deviceID, deviceInfo) in deviceStatusItems {
+        for (_, deviceInfo) in deviceStatusItems {
             if let button = deviceInfo.statusItem.button, button === sender {
                 let device = deviceInfo.device
                 showDeviceDetailsForDevice(device)
@@ -2249,7 +2351,7 @@ class StatusBarManager {
                     self.deviceStatusItems[deviceID] = (statusItem: deviceInfo.statusItem, device: device, popover: popover)
                     
                     // 添加全局点击监听器，确保点击外部时关闭弹窗
-                    NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self, weak popover] event in
+                    NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak popover] event in
                         if let popover = popover, popover.isShown {
                             popover.performClose(nil)
                         }
@@ -2274,6 +2376,8 @@ class StatusBarManager {
             // 如果已有设置窗口，先关闭它
             if let existingWindow = self.settingsWindow {
                 existingWindow.close()
+                self.settingsWindow = nil
+                self.settingsWindowDelegate = nil
             }
             
             // 创建新的设置窗口
@@ -2289,6 +2393,7 @@ class StatusBarManager {
             // 创建SwiftUI视图并设置为窗口内容
             let settingsView = SettingsView().environmentObject(self.bluetoothManager)
             let hostingController = NSHostingController(rootView: settingsView)
+            self.settingsHostingController = hostingController
             
             // 创建毛玻璃效果的背景视图
             let visualEffectView = NSVisualEffectView(frame: settingsWindow.contentRect(forFrameRect: settingsWindow.frame))
@@ -2315,13 +2420,98 @@ class StatusBarManager {
             // 确保窗口在所有窗口之上
             settingsWindow.level = .floating
             
-            // 存储窗口引用，避免被释放
+            // 创建并设置窗口代理
+            let delegate = WindowDelegate()
+            delegate.statusBarManager = self
+            settingsWindow.delegate = delegate
+            
+            // 存储窗口和代理引用，避免被释放
             self.settingsWindow = settingsWindow
+            self.settingsWindowDelegate = delegate
         }
     }
     
     @objc private func quitApp() {
-        NSApplication.shared.terminate(nil)
+        // 确保应用程序处于活动状态
+        NSApp.activate(ignoringOtherApps: true)
+        
+        // 创建确认退出的警告框
+        let alert = NSAlert()
+        alert.messageText = "确认退出"
+        alert.informativeText = "你确定要退出 BtBar 吗？"
+        alert.addButton(withTitle: "退出")
+        alert.addButton(withTitle: "取消")
+        
+        // 获取最后一次点击的位置
+        if let clickLocation = HoverableButton.lastClickLocation {
+            // 创建一个自定义窗口来显示警告框
+            let alertWindow = alert.window
+            
+            // 计算警告框的大小
+            let alertSize = alertWindow.frame.size
+            
+            // 计算警告框的位置：点击位置的正下方
+            let verticalOffset: CGFloat = 10 // 垂直距离
+            var alertFrame = NSRect(
+                x: clickLocation.x - alertSize.width / 2, // 水平居中
+                y: clickLocation.y - alertSize.height - verticalOffset, // 垂直下方
+                width: alertSize.width,
+                height: alertSize.height
+            )
+            
+            // 获取屏幕的可视区域
+            if let screen = NSScreen.main {
+                let screenFrame = screen.visibleFrame
+                
+                // 确保警告框不会超出屏幕边界
+                // 水平方向调整
+                if alertFrame.origin.x < screenFrame.origin.x {
+                    alertFrame.origin.x = screenFrame.origin.x
+                } else if alertFrame.origin.x + alertFrame.size.width > screenFrame.origin.x + screenFrame.size.width {
+                    alertFrame.origin.x = screenFrame.origin.x + screenFrame.size.width - alertFrame.size.width
+                }
+                
+                // 垂直方向调整
+                if alertFrame.origin.y < screenFrame.origin.y {
+                    alertFrame.origin.y = screenFrame.origin.y
+                } else if alertFrame.origin.y + alertFrame.size.height > screenFrame.origin.y + screenFrame.size.height {
+                    alertFrame.origin.y = screenFrame.origin.y + screenFrame.size.height - alertFrame.size.height
+                }
+            }
+            
+            // 设置警告框的位置
+            alertWindow.setFrame(alertFrame, display: false)
+            
+            // 显示警告框并处理用户响应
+            let response = alert.runModal()
+            if response == .alertFirstButtonReturn { // 用户点击了"退出"按钮
+                NSApplication.shared.terminate(nil)
+            }
+        } else {
+            // 如果没有获取到点击位置，使用默认方式显示
+            // 尝试使用主窗口作为父窗口显示警告框
+            if let window = NSApp.mainWindow ?? NSApp.windows.first {
+                // 使用sheet方式显示，确保置顶
+                alert.beginSheetModal(for: window) { response in
+                    if response == .alertFirstButtonReturn { // 用户点击了"退出"按钮
+                        NSApplication.shared.terminate(nil)
+                    }
+                }
+            } else {
+                // 如果没有主窗口，使用默认方式显示
+                let response = alert.runModal()
+                if response == .alertFirstButtonReturn { // 用户点击了"退出"按钮
+                    NSApplication.shared.terminate(nil)
+                }
+            }
+        }
+    }
+    
+    // 清理设置窗口引用
+    func cleanupSettingsWindow() {
+        settingsWindow = nil
+        settingsWindowDelegate = nil
+        settingsHostingController = nil
     }
     
     // 根据设备名称获取图标名称
@@ -2410,6 +2600,8 @@ struct SettingsView: View {
         .background(Color(NSColor.windowBackgroundColor))
     }
 }
+
+
 
 // 设备卡片组件
 struct DeviceCard: View {
