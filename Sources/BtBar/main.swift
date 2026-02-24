@@ -6,6 +6,8 @@ import UserNotifications
 import IOBluetooth
 import CoreImage
 import CoreAudio
+import IOKit
+import IOKit.hid
 
 // 全局工具函数
 func localTimeString() -> String {
@@ -40,17 +42,20 @@ func getAudioDevices() -> [(id: AudioDeviceID, name: String)] {
     }
     
     for deviceID in deviceIDs {
-        var name: CFString = "" as CFString
-        var nameSize: UInt32 = UInt32(MemoryLayout<CFString>.size)
-        propertyAddress.mSelector = kAudioDevicePropertyDeviceNameCFString
-        propertyAddress.mScope = kAudioObjectPropertyScopeGlobal
-        propertyAddress.mElement = kAudioObjectPropertyElementMain
-        
-        result = AudioObjectGetPropertyData(deviceID, &propertyAddress, 0, nil, &nameSize, &name)
-        if result == noErr {
-            devices.append((id: deviceID, name: name as String))
+            var name: CFString = "" as CFString
+            var nameSize: UInt32 = UInt32(MemoryLayout<CFString>.size)
+            propertyAddress.mSelector = kAudioDevicePropertyDeviceNameCFString
+            propertyAddress.mScope = kAudioObjectPropertyScopeGlobal
+            propertyAddress.mElement = kAudioObjectPropertyElementMain
+            
+            // 使用更安全的方式获取设备名称
+            result = withUnsafeMutablePointer(to: &name) { namePtr in
+                AudioObjectGetPropertyData(deviceID, &propertyAddress, 0, nil, &nameSize, namePtr)
+            }
+            if result == noErr {
+                devices.append((id: deviceID, name: name as String))
+            }
         }
-    }
     
     return devices
 }
@@ -122,7 +127,10 @@ func getCurrentDefaultAudioDevice() -> (id: AudioDeviceID, name: String)? {
     var nameSize: UInt32 = UInt32(MemoryLayout<CFString>.size)
     propertyAddress.mSelector = kAudioDevicePropertyDeviceNameCFString
     
-    let nameResult = AudioObjectGetPropertyData(deviceID, &propertyAddress, 0, nil, &nameSize, &name)
+    // 使用更安全的方式获取设备名称
+    let nameResult = withUnsafeMutablePointer(to: &name) { namePtr in
+        AudioObjectGetPropertyData(deviceID, &propertyAddress, 0, nil, &nameSize, namePtr)
+    }
     if nameResult != noErr {
         print("Error getting current default audio device name: \(nameResult)")
         return (id: deviceID, name: "Unknown")
@@ -706,25 +714,28 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
                 print("  Custom icon: \(customIconName ?? "nil")")
                 
                 // 创建蓝牙设备对象
-                // 为不同类型的设备设置更合理的默认电量
+                // 优先尝试获取真实电量，失败则设置为nil
                 var batteryLevel: Int?
                 if isConnected {
-                    // 检查设备类型，为不同类型设置不同的默认电量范围
-                    let lowerName = deviceName.lowercased()
-                    if lowerName.contains("airpod") || lowerName.contains("headphone") || lowerName.contains("earbud") {
-                        // 耳机类设备默认电量较高
-                        batteryLevel = 70
-                    } else if lowerName.contains("mouse") || lowerName.contains("keyboard") {
-                        // 输入设备默认电量中等
-                        batteryLevel = 60
-                    } else if lowerName.contains("speaker") {
-                        // 音箱默认电量较低
-                        batteryLevel = 50
+                    // 尝试获取真实电量
+                    let device = BluetoothDevice(
+                        id: deviceID,
+                        name: deviceName,
+                        macAddress: addressString.isEmpty ? deviceID : addressString,
+                        isConnected: isConnected,
+                        batteryLevel: nil,
+                        defaultIconName: "bluetooth",
+                        customIconName: customIconName
+                    )
+                    
+                    if let realBatteryLevel = fetchRealBatteryLevel(for: device) {
+                        batteryLevel = realBatteryLevel
+                        print("  Battery level: \(batteryLevel ?? 0)% (真实获取)")
                     } else {
-                        // 其他设备默认电量
-                        batteryLevel = 65
+                        // 无法获取真实电量，设置为nil
+                        batteryLevel = nil
+                        print("  Battery level: - (无法获取)")
                     }
-                    print("  Battery level: \(batteryLevel ?? 0)%")
                 } else {
                     print("  Battery level: nil (not connected)")
                 }
@@ -949,14 +960,108 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
     
     // 尝试从设备获取真实电量
     func fetchRealBatteryLevel(for device: BluetoothDevice) -> Int? {
-        // 这里是一个模拟实现，实际应用中需要根据设备类型和协议实现真实的电量获取
-        // 不同设备类型可能需要不同的电量获取方法
+        // 使用IOBluetooth框架获取真实的蓝牙设备电量
+        if let bluetoothDevice = IOBluetoothDevice(addressString: device.id) {
+            // 检查设备是否支持电量服务
+            if bluetoothDevice.isConnected() {
+                print("[\(localTimeString())] 尝试获取设备电量: \(device.name)")
+                print("[\(localTimeString())] 设备地址: \(bluetoothDevice.addressString ?? "Unknown")")
+                
+                // 方法1：尝试使用IOBluetoothDevice的电池相关属性
+                // 对于支持电池服务的设备，尝试获取电量
+                if let batteryLevel = getBatteryLevelFromIOBluetooth(bluetoothDevice: bluetoothDevice) {
+                    print("[\(localTimeString())] 通过IOBluetooth获取到电量: \(batteryLevel)%")
+                    return batteryLevel
+                }
+                
+                // 方法2：对于支持GATT的设备，使用CoreBluetooth获取电量
+                // 这里可以实现通过CoreBluetooth获取电量的逻辑
+                
+                // 方法3：尝试通过系统蓝牙设置获取电量
+                // 注意：这需要访问系统设置，可能需要特殊权限
+                
+                print("[\(localTimeString())] 无法获取真实电量，返回nil")
+                return nil // 不使用模拟电量，返回nil表示无法获取
+            }
+        }
         
-        // 1. 对于支持HID协议的设备（如鼠标、键盘），可以通过IOKit获取电量
-        // 2. 对于支持GATT协议的设备（如耳机），可以通过CoreBluetooth获取电量
-        // 3. 对于其他设备，可以尝试通过IOBluetooth获取电量
+        print("[\(localTimeString())] 无法获取设备电量: \(device.name)")
+        return nil
+    }
+    
+    // 通过IOBluetooth获取设备电量
+    private func getBatteryLevelFromIOBluetooth(bluetoothDevice: IOBluetoothDevice) -> Int? {
+        // 尝试获取设备的电池服务
+        // 注意：IOBluetooth框架的电量获取比较复杂，不同设备类型可能需要不同的方式
         
-        // 模拟实现：根据设备类型返回不同的电量范围
+        // 对于HID设备（如鼠标、键盘），尝试通过IOKit获取电量
+        if let batteryLevel = getHIDDeviceBatteryLevel(deviceName: bluetoothDevice.name ?? "") {
+            return batteryLevel
+        }
+        
+        // 对于支持GATT的设备（如耳机），尝试通过CoreBluetooth获取电量
+        if let batteryLevel = getBatteryLevelFromCoreBluetooth(deviceName: bluetoothDevice.name ?? "") {
+            return batteryLevel
+        }
+        
+        // 尝试通过IOBluetoothDevice的其他方法获取电量
+        // 对于不同类型的设备，可能需要不同的方法
+        if let batteryLevel = getBatteryLevelFromIOBluetoothDevice(bluetoothDevice: bluetoothDevice) {
+            return batteryLevel
+        }
+        
+        return nil
+    }
+    
+    // 通过IOBluetoothDevice的具体方法获取电量
+    private func getBatteryLevelFromIOBluetoothDevice(bluetoothDevice: IOBluetoothDevice) -> Int? {
+        print("[\(localTimeString())] 尝试通过IOBluetoothDevice获取电量")
+        
+        // 对于特定设备类型，尝试不同的电量获取方法
+        let deviceName = bluetoothDevice.name ?? ""
+        if deviceName.lowercased().contains("flipbuds") || deviceName.lowercased().contains("airpod") {
+            print("[\(localTimeString())] 尝试获取耳机设备电量")
+            // 这里可以实现针对耳机设备的电量获取逻辑
+            // 对于FlipBuds Pro等设备，通常需要通过CoreBluetooth获取电量
+        }
+        
+        print("[\(localTimeString())] IOBluetoothDevice电量获取暂未实现")
+        return nil
+    }
+    
+    // 通过CoreBluetooth获取设备电量
+    private func getBatteryLevelFromCoreBluetooth(deviceName: String) -> Int? {
+        print("[\(localTimeString())] 尝试通过CoreBluetooth获取电量: \(deviceName)")
+        
+        // 这里可以实现通过CoreBluetooth获取电量的逻辑
+        // 注意：CoreBluetooth的电量获取需要连接到设备并读取GATT服务
+        // 由于实现复杂度较高，这里暂时返回nil
+        // 实际应用中需要实现完整的CoreBluetooth电量获取逻辑
+        
+        // 对于FlipBuds Pro等耳机设备，通常需要：
+        // 1. 扫描并连接到设备
+        // 2. 发现电池服务（UUID: 0x180F）
+        // 3. 发现电池电量特征（UUID: 0x2A19）
+        // 4. 读取电量值
+        
+        print("[\(localTimeString())] CoreBluetooth电量获取暂未实现")
+        return nil
+    }
+    
+    // 通过IOKit获取HID设备电量
+    private func getHIDDeviceBatteryLevel(deviceName: String) -> Int? {
+        // 注意：IOKit的电量获取比较复杂，这里只是一个简单的实现
+        // 实际应用中需要根据具体设备类型进行调整
+        
+        // 由于IOKit的电量获取可能会导致崩溃，这里暂时返回nil
+        // 实际应用中需要实现完整的IOKit电量获取逻辑
+        print("[\(localTimeString())] 尝试通过IOKit获取HID设备电量: \(deviceName)")
+        return nil
+    }
+    
+    // 根据设备类型返回模拟电量
+    private func getSimulatedBatteryLevel(for device: BluetoothDevice) -> Int {
+        // 根据设备类型返回不同的模拟电量
         let deviceName = device.name.lowercased()
         
         // 耳机类设备通常有较高的电量
@@ -1139,9 +1244,18 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
         let timestamp = localTimeString()
         print("[\(timestamp)] Checking battery level for: \(device.name)")
         // 检查设备电量并发送低电量提醒
-        if let batteryLevel = device.batteryLevel, batteryLevel < 20 {
+        if let batteryLevel = device.batteryLevel, batteryLevel < 15 {
             print("[\(timestamp)] Low battery detected: \(batteryLevel)%")
             sendLowBatteryNotification(for: device)
+            
+            // 触发设备详情弹窗
+            DispatchQueue.main.async {
+                // 获取StatusBarManager实例
+                let appDelegate = NSApplication.shared.delegate as? AppDelegate
+                if let statusBarManager = appDelegate?.statusBarManager {
+                    statusBarManager.showDeviceDetailsForDevice(device, autoClose: false)
+                }
+            }
         }
     }
     
@@ -2591,11 +2705,11 @@ class StatusBarManager {
         }
     }
     
-    private func showDeviceDetailsForDevice(_ device: BluetoothDevice, autoClose: Bool = false) {
+    internal func showDeviceDetailsForDevice(_ device: BluetoothDevice, autoClose: Bool = false) {
         // 显示设备详情信息
         print("显示设备详情信息: \(device.name)")
         print("已连接: \(device.isConnected)")
-        print("电量: \(device.batteryLevel ?? 0)%")
+        print("电量: \(device.batteryLevel != nil ? "\(device.batteryLevel!)%" : "-")")
         print("自定义图标: \(device.customIconName ?? "无")")
         print("自动关闭: \(autoClose)")
         
@@ -2703,7 +2817,7 @@ class StatusBarManager {
                     
                     // 添加电量数值
                     let batteryValueLabel = NSTextField(frame: NSRect(x: 65, y: 0.5, width: 80, height: 20)) // 调整位置和大小
-                    batteryValueLabel.stringValue = "\(device.batteryLevel ?? 0)%"
+                    batteryValueLabel.stringValue = device.batteryLevel != nil ? "\(device.batteryLevel!)%" : "-"
                     batteryValueLabel.isBezeled = false
                     batteryValueLabel.isEditable = false
                     batteryValueLabel.backgroundColor = .clear
