@@ -198,12 +198,20 @@ struct BluetoothDevice: Identifiable, Hashable {
     var name: String
     let macAddress: String
     var isConnected: Bool
-    var batteryLevel: Int?
+    var batteryLevel: Int? // 通用设备电量
+    var caseBatteryLevel: Int? // 苹果设备充电盒电量
+    var leftBatteryLevel: Int? // 苹果设备左耳电量
+    var rightBatteryLevel: Int? // 苹果设备右耳电量
     var defaultIconName: String
     var customIconName: String?
     
     var iconName: String {
         return customIconName ?? defaultIconName
+    }
+    
+    // 检查是否是苹果设备（有多个电量级别）
+    var isAppleDevice: Bool {
+        return caseBatteryLevel != nil || leftBatteryLevel != nil || rightBatteryLevel != nil
     }
     
     func hash(into hasher: inout Hasher) {
@@ -716,21 +724,42 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
                 // 创建蓝牙设备对象
                 // 优先尝试获取真实电量，失败则设置为nil
                 var batteryLevel: Int?
+                var caseBatteryLevel: Int? = nil
+                var leftBatteryLevel: Int? = nil
+                var rightBatteryLevel: Int? = nil
+                
                 if isConnected {
                     // 尝试获取真实电量
-                    let device = BluetoothDevice(
+                    let tempDevice = BluetoothDevice(
                         id: deviceID,
                         name: deviceName,
                         macAddress: addressString.isEmpty ? deviceID : addressString,
                         isConnected: isConnected,
                         batteryLevel: nil,
+                        caseBatteryLevel: nil,
+                        leftBatteryLevel: nil,
+                        rightBatteryLevel: nil,
                         defaultIconName: "bluetooth",
                         customIconName: customIconName
                     )
                     
-                    if let realBatteryLevel = fetchRealBatteryLevel(for: device) {
-                        batteryLevel = realBatteryLevel
+                    let batteryLevels = fetchRealBatteryLevel(for: tempDevice)
+                    if batteryLevels.caseLevel != nil || batteryLevels.leftLevel != nil || batteryLevels.rightLevel != nil || batteryLevels.generalLevel != nil {
+                        // 对于苹果设备，使用通用电量或左耳电量作为显示电量
+                        batteryLevel = batteryLevels.generalLevel ?? batteryLevels.leftLevel
+                        caseBatteryLevel = batteryLevels.caseLevel
+                        leftBatteryLevel = batteryLevels.leftLevel
+                        rightBatteryLevel = batteryLevels.rightLevel
                         print("  Battery level: \(batteryLevel ?? 0)% (真实获取)")
+                        if let caseLevel = caseBatteryLevel {
+                            print("  Case battery: \(caseLevel)%")
+                        }
+                        if let leftLevel = leftBatteryLevel {
+                            print("  Left battery: \(leftLevel)%")
+                        }
+                        if let rightLevel = rightBatteryLevel {
+                            print("  Right battery: \(rightLevel)%")
+                        }
                     } else {
                         // 无法获取真实电量，设置为nil
                         batteryLevel = nil
@@ -749,6 +778,9 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
                     macAddress: addressString.isEmpty ? deviceID : addressString,
                     isConnected: isConnected,
                     batteryLevel: batteryLevel,
+                    caseBatteryLevel: caseBatteryLevel,
+                    leftBatteryLevel: leftBatteryLevel,
+                    rightBatteryLevel: rightBatteryLevel,
                     defaultIconName: defaultIconName,
                     customIconName: customIconName
                 )
@@ -948,69 +980,76 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
         }
     }
     
-    func updateDeviceBattery(_ device: BluetoothDevice, batteryLevel: Int) {
+    func updateDeviceBattery(_ device: BluetoothDevice, caseLevel: Int?, leftLevel: Int?, rightLevel: Int?, generalLevel: Int?) {
         // 更新设备的电量
         if let index = devices.firstIndex(where: { $0.id == device.id }) {
-            devices[index].batteryLevel = batteryLevel
+            devices[index].caseBatteryLevel = caseLevel
+            devices[index].leftBatteryLevel = leftLevel
+            devices[index].rightBatteryLevel = rightLevel
+            devices[index].batteryLevel = generalLevel
             
             // 检查是否需要发送低电量提醒
             checkBatteryLevel(for: devices[index])
         }
     }
     
+    // 兼容旧方法
+    func updateDeviceBattery(_ device: BluetoothDevice, batteryLevel: Int) {
+        updateDeviceBattery(device, caseLevel: nil, leftLevel: nil, rightLevel: nil, generalLevel: batteryLevel)
+    }
+    
     // 尝试从设备获取真实电量
-    func fetchRealBatteryLevel(for device: BluetoothDevice) -> Int? {
-        // 使用IOBluetooth框架获取真实的蓝牙设备电量
-        if let bluetoothDevice = IOBluetoothDevice(addressString: device.id) {
-            // 检查设备是否支持电量服务
-            if bluetoothDevice.isConnected() {
-                print("[\(localTimeString())] 尝试获取设备电量: \(device.name)")
-                print("[\(localTimeString())] 设备地址: \(bluetoothDevice.addressString ?? "Unknown")")
-                
-                // 方法1：尝试使用IOBluetoothDevice的电池相关属性
-                // 对于支持电池服务的设备，尝试获取电量
-                if let batteryLevel = getBatteryLevelFromIOBluetooth(bluetoothDevice: bluetoothDevice) {
-                    print("[\(localTimeString())] 通过IOBluetooth获取到电量: \(batteryLevel)%")
-                    return batteryLevel
-                }
-                
-                // 方法2：对于支持GATT的设备，使用CoreBluetooth获取电量
-                // 这里可以实现通过CoreBluetooth获取电量的逻辑
-                
-                // 方法3：尝试通过系统蓝牙设置获取电量
-                // 注意：这需要访问系统设置，可能需要特殊权限
-                
-                print("[\(localTimeString())] 无法获取真实电量，返回nil")
-                return nil // 不使用模拟电量，返回nil表示无法获取
+    func fetchRealBatteryLevel(for device: BluetoothDevice) -> (caseLevel: Int?, leftLevel: Int?, rightLevel: Int?, generalLevel: Int?) {
+        // 仅使用system_profiler SPBluetoothDataType -json获取电量
+        print("[\(localTimeString())] 尝试获取设备电量: \(device.name)")
+        print("[\(localTimeString())] 设备地址: \(device.macAddress)")
+        
+        let batteryLevels = getAirPodsBatteryLevel(deviceName: device.name, deviceAddress: device.macAddress)
+        if batteryLevels.caseLevel != nil || batteryLevels.leftLevel != nil || batteryLevels.rightLevel != nil || batteryLevels.generalLevel != nil {
+            print("[\(localTimeString())] 通过system_profiler获取到电量")
+            if let caseLevel = batteryLevels.caseLevel {
+                print("  充电盒电量: \(caseLevel)%")
             }
+            if let leftLevel = batteryLevels.leftLevel {
+                print("  左耳电量: \(leftLevel)%")
+            }
+            if let rightLevel = batteryLevels.rightLevel {
+                print("  右耳电量: \(rightLevel)%")
+            }
+            if let generalLevel = batteryLevels.generalLevel {
+                print("  通用电量: \(generalLevel)%")
+            }
+            return batteryLevels
         }
         
-        print("[\(localTimeString())] 无法获取设备电量: \(device.name)")
-        return nil
+        print("[\(localTimeString())] 无法获取真实电量，返回nil")
+        return (nil, nil, nil, nil) // 不使用模拟电量，返回nil表示无法获取
     }
     
     // 通过IOBluetooth获取设备电量
-    private func getBatteryLevelFromIOBluetooth(bluetoothDevice: IOBluetoothDevice) -> Int? {
+    private func getBatteryLevelFromIOBluetooth(bluetoothDevice: IOBluetoothDevice) -> (caseLevel: Int?, leftLevel: Int?, rightLevel: Int?, generalLevel: Int?) {
         // 尝试获取设备的电池服务
         // 注意：IOBluetooth框架的电量获取比较复杂，不同设备类型可能需要不同的方式
         
         // 对于HID设备（如鼠标、键盘），尝试通过IOKit获取电量
-        if let batteryLevel = getHIDDeviceBatteryLevel(deviceName: bluetoothDevice.name ?? "") {
-            return batteryLevel
+        if let generalLevel = getHIDDeviceBatteryLevel(deviceName: bluetoothDevice.name ?? "") {
+            return (nil, nil, nil, generalLevel)
         }
         
         // 对于支持GATT的设备（如耳机），尝试通过CoreBluetooth获取电量
-        if let batteryLevel = getBatteryLevelFromCoreBluetooth(deviceName: bluetoothDevice.name ?? "") {
-            return batteryLevel
+        let deviceAddress = bluetoothDevice.addressString ?? ""
+        let batteryLevels = getBatteryLevelFromCoreBluetooth(deviceName: bluetoothDevice.name ?? "", deviceAddress: deviceAddress)
+        if batteryLevels.caseLevel != nil || batteryLevels.leftLevel != nil || batteryLevels.rightLevel != nil || batteryLevels.generalLevel != nil {
+            return batteryLevels
         }
         
         // 尝试通过IOBluetoothDevice的其他方法获取电量
         // 对于不同类型的设备，可能需要不同的方法
-        if let batteryLevel = getBatteryLevelFromIOBluetoothDevice(bluetoothDevice: bluetoothDevice) {
-            return batteryLevel
+        if let generalLevel = getBatteryLevelFromIOBluetoothDevice(bluetoothDevice: bluetoothDevice) {
+            return (nil, nil, nil, generalLevel)
         }
         
-        return nil
+        return (nil, nil, nil, nil)
     }
     
     // 通过IOBluetoothDevice的具体方法获取电量
@@ -1030,32 +1069,190 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
     }
     
     // 通过CoreBluetooth获取设备电量
-    private func getBatteryLevelFromCoreBluetooth(deviceName: String) -> Int? {
+    private func getBatteryLevelFromCoreBluetooth(deviceName: String, deviceAddress: String) -> (caseLevel: Int?, leftLevel: Int?, rightLevel: Int?, generalLevel: Int?) {
         print("[\(localTimeString())] 尝试通过CoreBluetooth获取电量: \(deviceName)")
         
-        // 这里可以实现通过CoreBluetooth获取电量的逻辑
-        // 注意：CoreBluetooth的电量获取需要连接到设备并读取GATT服务
-        // 由于实现复杂度较高，这里暂时返回nil
-        // 实际应用中需要实现完整的CoreBluetooth电量获取逻辑
+        // 对于AirPods等苹果设备，使用getAirPodsBatteryLevel方法获取多个电量级别
+        if deviceName.lowercased().contains("airpod") || deviceName.lowercased().contains("earbud") || deviceName.lowercased().contains("headphone") {
+            let batteryLevels = getAirPodsBatteryLevel(deviceName: deviceName, deviceAddress: deviceAddress)
+            if batteryLevels.caseLevel != nil || batteryLevels.leftLevel != nil || batteryLevels.rightLevel != nil || batteryLevels.generalLevel != nil {
+                return batteryLevels
+            }
+        }
         
-        // 对于FlipBuds Pro等耳机设备，通常需要：
-        // 1. 扫描并连接到设备
-        // 2. 发现电池服务（UUID: 0x180F）
-        // 3. 发现电池电量特征（UUID: 0x2A19）
-        // 4. 读取电量值
+        // 对于其他设备，尝试获取通用电量
+        let batteryLevels = getAirPodsBatteryLevel(deviceName: deviceName, deviceAddress: deviceAddress)
+        return batteryLevels
+    }
+    
+    // 获取AirPods等苹果设备的电量
+    private func getAirPodsBatteryLevel(deviceName: String, deviceAddress: String) -> (caseLevel: Int?, leftLevel: Int?, rightLevel: Int?, generalLevel: Int?) {
+        print("[\(localTimeString())] 尝试获取AirPods电量: \(deviceName), 地址: \(deviceAddress)")
         
-        print("[\(localTimeString())] CoreBluetooth电量获取暂未实现")
-        return nil
+        // 使用system_profiler命令获取蓝牙设备信息，使用JSON格式输出
+        let command = "system_profiler SPBluetoothDataType -json"
+        print("[\(localTimeString())] 执行命令: \(command)")
+        
+        let task = Process()
+        task.launchPath = "/bin/bash"
+        task.arguments = ["-c", command]
+        
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        
+        var caseLevel: Int? = nil
+        var leftLevel: Int? = nil
+        var rightLevel: Int? = nil
+        var generalLevel: Int? = nil
+        
+        do {
+            try task.run()
+            task.waitUntilExit()
+            
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            if let output = String(data: data, encoding: .utf8) {
+                print("[\(localTimeString())] 命令输出长度: \(output.count) 字符")
+                
+                // 解析JSON输出
+                if let data = output.data(using: .utf8) {
+                    do {
+                        if let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] {
+                            if let bluetoothData = json["SPBluetoothDataType"] as? [[String: Any]] {
+                                for bluetoothItem in bluetoothData {
+                                    if let connectedDevices = bluetoothItem["device_connected"] as? [[String: Any]] {
+                                        for deviceItem in connectedDevices {
+                                            for (deviceKey, deviceInfo) in deviceItem {
+                                                if let deviceDetails = deviceInfo as? [String: Any] {
+                                                    // 获取设备地址并与目标设备地址比对
+                                                    if let deviceAddressValue = deviceDetails["device_address"] as? String {
+                                                        // 格式化地址以确保匹配（移除冒号和连字符并转为大写）
+                                                        let formattedTargetAddress = deviceAddress.replacingOccurrences(of: ":", with: "").replacingOccurrences(of: "-", with: "").uppercased()
+                                                        let formattedDeviceAddress = deviceAddressValue.replacingOccurrences(of: ":", with: "").replacingOccurrences(of: "-", with: "").uppercased()
+                                                        
+                                                        if formattedTargetAddress == formattedDeviceAddress {
+                                                            print("[\(localTimeString())] 找到匹配的设备: \(deviceKey)")
+                                                            
+                                                            // 提取电量信息
+                                                            if let caseBattery = deviceDetails["device_batteryLevelCase"] as? String {
+                                                                if let level = Int(caseBattery.replacingOccurrences(of: "%", with: "")) {
+                                                                    caseLevel = level
+                                                                    print("[\(localTimeString())] 成功获取充电盒电量: \(level)%")
+                                                                }
+                                                            }
+                                                            
+                                                            if let leftBattery = deviceDetails["device_batteryLevelLeft"] as? String {
+                                                                if let level = Int(leftBattery.replacingOccurrences(of: "%", with: "")) {
+                                                                    leftLevel = level
+                                                                    print("[\(localTimeString())] 成功获取左耳电量: \(level)%")
+                                                                }
+                                                            }
+                                                            
+                                                            if let rightBattery = deviceDetails["device_batteryLevelRight"] as? String {
+                                                                if let level = Int(rightBattery.replacingOccurrences(of: "%", with: "")) {
+                                                                    rightLevel = level
+                                                                    print("[\(localTimeString())] 成功获取右耳电量: \(level)%")
+                                                                }
+                                                            }
+                                                            
+                                                            // 尝试获取通用电量
+                                                            if let batteryLevel = deviceDetails["device_batteryLevel"] as? String {
+                                                                if let level = Int(batteryLevel.replacingOccurrences(of: "%", with: "")) {
+                                                                    generalLevel = level
+                                                                    print("[\(localTimeString())] 成功获取通用设备电量: \(level)%")
+                                                                }
+                                                            }
+                                                            
+                                                            // 尝试获取非苹果设备的主电量
+                                                            if let mainBattery = deviceDetails["device_batteryLevelMain"] as? String {
+                                                                if let level = Int(mainBattery.replacingOccurrences(of: "%", with: "")) {
+                                                                    generalLevel = level
+                                                                    print("[\(localTimeString())] 成功获取非苹果设备主电量: \(level)%")
+                                                                }
+                                                            }
+                                                            
+                                                            // 找到匹配设备后退出循环
+                                                            return (caseLevel, leftLevel, rightLevel, generalLevel)
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } catch {
+                        print("[\(localTimeString())] JSON解析失败: \(error)")
+                    }
+                }
+            }
+        } catch {
+            print("[\(localTimeString())] 执行命令失败: \(error)")
+        }
+        
+        return (caseLevel, leftLevel, rightLevel, generalLevel)
     }
     
     // 通过IOKit获取HID设备电量
     private func getHIDDeviceBatteryLevel(deviceName: String) -> Int? {
-        // 注意：IOKit的电量获取比较复杂，这里只是一个简单的实现
-        // 实际应用中需要根据具体设备类型进行调整
-        
-        // 由于IOKit的电量获取可能会导致崩溃，这里暂时返回nil
-        // 实际应用中需要实现完整的IOKit电量获取逻辑
         print("[\(localTimeString())] 尝试通过IOKit获取HID设备电量: \(deviceName)")
+        
+        // 尝试通过ioreg命令获取蓝牙设备电量
+        // 对于键盘
+        if let keyboardBattery = getBatteryLevelUsingIOreg(type: "AppleBluetoothHIDKeyboard", deviceName: deviceName) {
+            return keyboardBattery
+        }
+        
+        // 对于鼠标
+        if let mouseBattery = getBatteryLevelUsingIOreg(type: "BNBMouseDevice", deviceName: deviceName) {
+            return mouseBattery
+        }
+        
+        // 对于其他HID设备
+        if let otherBattery = getBatteryLevelUsingIOreg(type: "IOBluetoothHIDDevice", deviceName: deviceName) {
+            return otherBattery
+        }
+        
+        print("[\(localTimeString())] IOKit电量获取失败")
+        return nil
+    }
+    
+    // 通过ioreg命令获取设备电量
+    private func getBatteryLevelUsingIOreg(type: String, deviceName: String) -> Int? {
+        let command = "ioreg -c \(type) | grep '\"BatteryPercent\" ='"
+        print("[\(localTimeString())] 执行命令: \(command)")
+        
+        let task = Process()
+        task.launchPath = "/bin/bash"
+        task.arguments = ["-c", command]
+        
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        
+        do {
+            try task.run()
+            task.waitUntilExit()
+            
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            if let output = String(data: data, encoding: .utf8) {
+                print("[\(localTimeString())] 命令输出: \(output)")
+                
+                // 解析输出，提取电量值
+                if let range = output.range(of: #"BatteryPercent"\s*=\s*([0-9]+)"#, options: .regularExpression) {
+                    // 提取数字部分
+                    if let numberRange = output.range(of: "[0-9]+", options: .regularExpression, range: range) {
+                        let batteryString = output[numberRange]
+                        if let batteryLevel = Int(batteryString) {
+                            print("[\(localTimeString())] 成功获取电量: \(batteryLevel)%")
+                            return batteryLevel
+                        }
+                    }
+                }
+            }
+        } catch {
+            print("[\(localTimeString())] 执行命令失败: \(error)")
+        }
+        
         return nil
     }
     
@@ -1094,8 +1291,9 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
             
             // 只检查已连接的设备
             for device in self.devices where device.isConnected {
-                if let batteryLevel = self.fetchRealBatteryLevel(for: device) {
-                    self.updateDeviceBattery(device, batteryLevel: batteryLevel)
+                let batteryLevels = self.fetchRealBatteryLevel(for: device)
+                if batteryLevels.caseLevel != nil || batteryLevels.leftLevel != nil || batteryLevels.rightLevel != nil || batteryLevels.generalLevel != nil {
+                    self.updateDeviceBattery(device, caseLevel: batteryLevels.caseLevel, leftLevel: batteryLevels.leftLevel, rightLevel: batteryLevels.rightLevel, generalLevel: batteryLevels.generalLevel)
                 }
             }
         }
@@ -1205,8 +1403,14 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
                 self.devices[index].isConnected = true
                 // 尝试获取真实电量，失败则使用默认值
                 var batteryLevel: Int
-                if let realBatteryLevel = self.fetchRealBatteryLevel(for: self.devices[index]) {
+                let batteryLevels = self.fetchRealBatteryLevel(for: self.devices[index])
+                if let realBatteryLevel = batteryLevels.generalLevel ?? batteryLevels.leftLevel {
                     batteryLevel = realBatteryLevel
+                    // 更新所有电量属性
+                    self.devices[index].caseBatteryLevel = batteryLevels.caseLevel
+                    self.devices[index].leftBatteryLevel = batteryLevels.leftLevel
+                    self.devices[index].rightBatteryLevel = batteryLevels.rightLevel
+                    self.devices[index].batteryLevel = realBatteryLevel
                 } else {
                     // 如果无法获取真实电量，使用基于设备类型的默认值
                     let deviceName = self.devices[index].name
@@ -1224,8 +1428,12 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
                         // 其他设备默认电量
                         batteryLevel = 65
                     }
+                    // 重置所有电量属性
+                    self.devices[index].caseBatteryLevel = nil
+                    self.devices[index].leftBatteryLevel = nil
+                    self.devices[index].rightBatteryLevel = nil
+                    self.devices[index].batteryLevel = batteryLevel
                 }
-                self.devices[index].batteryLevel = batteryLevel
                 print("[\(localTimeString())] Device \(self.devices[index].name) connected with battery: \(batteryLevel)%")
                 
                 // 检查是否需要发送低电量提醒
@@ -1412,7 +1620,7 @@ class StatusBarManager {
     private var bluetoothManager: BluetoothManager
     private var cancellables = Set<AnyCancellable>()
     private var showDeviceIcons: [String: Bool] = [:] // 存储设备图标显示设置
-    private var lastDeviceStates: [String: (isConnected: Bool, customIconName: String?, batteryLevel: Int?)] = [:] // 存储设备的最后状态
+    private var lastDeviceStates: [String: (isConnected: Bool, customIconName: String?, batteryLevel: Int?, caseBatteryLevel: Int?, leftBatteryLevel: Int?, rightBatteryLevel: Int?)] = [:] // 存储设备的最后状态
     private var settingsWindow: NSWindow? // 存储设置窗口引用，避免被释放
     private var settingsWindowDelegate: WindowDelegate? // 存储窗口代理引用，确保生命周期与窗口一致
     private var settingsHostingController: NSViewController? // 存储设置窗口的hosting controller引用
@@ -1565,7 +1773,7 @@ class StatusBarManager {
                 print("[\(timestamp)] 处理设备: \(device.name), ID: \(device.id)")
                 
                 // 检查设备状态是否发生变化
-                let currentState = (isConnected: device.isConnected, customIconName: device.customIconName, batteryLevel: device.batteryLevel)
+                let currentState = (isConnected: device.isConnected, customIconName: device.customIconName, batteryLevel: device.batteryLevel, caseBatteryLevel: device.caseBatteryLevel, leftBatteryLevel: device.leftBatteryLevel, rightBatteryLevel: device.rightBatteryLevel)
                 let lastState = self.lastDeviceStates[device.id]
                 
                 // 检查是否是从断开变为连接状态
@@ -1917,22 +2125,31 @@ class StatusBarManager {
                 
                 // 创建蓝牙设备对象
                 var batteryLevel: Int?
+                var caseBatteryLevel: Int?
+                var leftBatteryLevel: Int?
+                var rightBatteryLevel: Int?
+                
                 if isConnected {
-                    // 检查设备类型，为不同类型设置不同的默认电量范围
-                    let lowerName = deviceName.lowercased()
-                    if lowerName.contains("airpod") || lowerName.contains("headphone") || lowerName.contains("earbud") {
-                        // 耳机类设备默认电量较高
-                        batteryLevel = 70
-                    } else if lowerName.contains("mouse") || lowerName.contains("keyboard") {
-                        // 输入设备默认电量中等
-                        batteryLevel = 60
-                    } else if lowerName.contains("speaker") {
-                        // 音箱默认电量较低
-                        batteryLevel = 50
-                    } else {
-                        // 其他设备默认电量
-                        batteryLevel = 65
-                    }
+                    // 创建临时设备对象以获取真实电量
+                    let tempDevice = BluetoothDevice(
+                        id: deviceID,
+                        name: deviceName,
+                        macAddress: addressString.isEmpty ? deviceID : addressString,
+                        isConnected: isConnected,
+                        batteryLevel: nil,
+                        caseBatteryLevel: nil,
+                        leftBatteryLevel: nil,
+                        rightBatteryLevel: nil,
+                        defaultIconName: getDeviceIconName(for: deviceName),
+                        customIconName: customIconName
+                    )
+                    
+                    // 获取真实电量
+                    let batteryLevels = bluetoothManager.fetchRealBatteryLevel(for: tempDevice)
+                    caseBatteryLevel = batteryLevels.caseLevel
+                    leftBatteryLevel = batteryLevels.leftLevel
+                    rightBatteryLevel = batteryLevels.rightLevel
+                    batteryLevel = batteryLevels.generalLevel ?? batteryLevels.leftLevel
                 }
                 
                 let device = BluetoothDevice(
@@ -1941,6 +2158,9 @@ class StatusBarManager {
                     macAddress: addressString.isEmpty ? deviceID : addressString,
                     isConnected: isConnected,
                     batteryLevel: batteryLevel,
+                    caseBatteryLevel: caseBatteryLevel,
+                    leftBatteryLevel: leftBatteryLevel,
+                    rightBatteryLevel: rightBatteryLevel,
                     defaultIconName: getDeviceIconName(for: deviceName),
                     customIconName: customIconName
                 )
@@ -2218,7 +2438,7 @@ class StatusBarManager {
         deviceView.addSubview(nameLabel)
         
         // 添加连接状态指示器
-        let statusLabel = NSTextField(frame: NSRect(x: 140, y: 0, width: 20, height: 24))
+        let statusLabel = NSTextField(frame: NSRect(x: 130, y: 0, width: 20, height: 24))
         statusLabel.stringValue = device.isConnected ? "●" : ""
         statusLabel.isBezeled = false
         statusLabel.isEditable = false
@@ -2710,6 +2930,10 @@ class StatusBarManager {
         print("显示设备详情信息: \(device.name)")
         print("已连接: \(device.isConnected)")
         print("电量: \(device.batteryLevel != nil ? "\(device.batteryLevel!)%" : "-")")
+        print("盒子电量: \(device.caseBatteryLevel != nil ? "\(device.caseBatteryLevel!)%" : "-")")
+        print("左耳电量: \(device.leftBatteryLevel != nil ? "\(device.leftBatteryLevel!)%" : "-")")
+        print("右耳电量: \(device.rightBatteryLevel != nil ? "\(device.rightBatteryLevel!)%" : "-")")
+        print("是否苹果设备: \(device.isAppleDevice)")
         print("自定义图标: \(device.customIconName ?? "无")")
         print("自动关闭: \(autoClose)")
         
@@ -2728,13 +2952,15 @@ class StatusBarManager {
                     // 创建新的气泡
                     let popover = NSPopover()
                     popover.behavior = .transient // 点击外部时自动关闭
-                    popover.contentSize = NSSize(width: 220, height: 140) // 调整尺寸以适应电池图标
+                    // 统一气泡大小，因为电量显示布局已统一
+                    let popoverHeight = 140.0
+                    popover.contentSize = NSSize(width: 220, height: popoverHeight) // 调整尺寸以适应电池图标
                     popover.animates = true // 添加动画效果
                     // 确保气泡显示到最上层
                     popover.appearance = NSAppearance(named: .darkAqua) // 使用暗色外观，确保与菜单背景一致
                     
                     // 创建磨砂玻璃效果的背景视图
-                    let visualEffectView = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: 220, height: 140)) // 调整尺寸以适应电池图标
+                    let visualEffectView = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: 220, height: popoverHeight)) // 调整尺寸以适应电池图标
                     visualEffectView.wantsLayer = true
                     visualEffectView.material = .menu // 使用与菜单相同的材质
                     visualEffectView.blendingMode = .withinWindow // 更改混合模式以获得更好的毛玻璃效果
@@ -2759,7 +2985,7 @@ class StatusBarManager {
                     nameLabel.isEditable = false
                     nameLabel.backgroundColor = .clear
                     nameLabel.textColor = .controlTextColor // 使用系统文本颜色
-                    nameLabel.font = NSFont.boldSystemFont(ofSize: 12)
+                    nameLabel.font = NSFont.boldSystemFont(ofSize: 14)
                     visualEffectView.addSubview(nameLabel)
                     
                     /////////////////// 添加连接状态
@@ -2772,10 +2998,10 @@ class StatusBarManager {
                     visualEffectView.addSubview(statusLabel)
                     
                     ////////////////////// 添加电量信息和电池图标
-                    let batteryView = NSView(frame: NSRect(x: 12, y: 44, width: 236, height: 20)) // 调整位置和大小，整体向上移动
+                    let batteryView = NSView(frame: NSRect(x: 12, y: 44, width: 236, height: 20)) // 统一位置和大小
                     
                     // 添加电量标签
-                    let batteryLabel = NSTextField(frame: NSRect(x: 0, y: 0, width: 35, height: 20)) // 调整位置和大小
+                    let batteryLabel = NSTextField(frame: NSRect(x: 0, y: 0, width: 35, height: 20))
                     batteryLabel.stringValue = "电量:"
                     batteryLabel.isBezeled = false
                     batteryLabel.isEditable = false
@@ -2783,51 +3009,144 @@ class StatusBarManager {
                     batteryLabel.textColor = .secondaryLabelColor // 使用系统次要文本颜色
                     batteryView.addSubview(batteryLabel)
                     
-                    // 创建电池图标
-                    let batteryIconView = NSView(frame: NSRect(x: 40, y: 6, width: 24, height: 12)) // 调整位置和大小，放置到文字右侧
-                    batteryIconView.wantsLayer = true
-                    batteryIconView.layer?.borderWidth = 1
-                    batteryIconView.layer?.borderColor = NSColor.secondaryLabelColor.cgColor
-                    batteryIconView.layer?.cornerRadius = 2
-                    
-                    // 创建电池正极
-                    let batteryPositiveView = NSView(frame: NSRect(x: 44, y: 4, width: 5, height: 8))
-                    batteryPositiveView.wantsLayer = true
-                    batteryPositiveView.layer?.backgroundColor = NSColor.secondaryLabelColor.cgColor
-                    batteryIconView.addSubview(batteryPositiveView)
-                    
-                    // 根据电池电量填充颜色
-                    if let batteryLevel = device.batteryLevel {
-                        let batteryFillView = NSView(frame: NSRect(x: 1, y: 1, width: CGFloat(batteryLevel) * 0.22, height: 10))
-                        batteryFillView.wantsLayer = true
-                        
-                        // 根据电量设置不同颜色
-                        if batteryLevel > 60 {
-                            batteryFillView.layer?.backgroundColor = NSColor.systemGreen.cgColor
-                        } else if batteryLevel > 20 {
-                            batteryFillView.layer?.backgroundColor = NSColor.systemYellow.cgColor
-                        } else {
-                            batteryFillView.layer?.backgroundColor = NSColor.systemRed.cgColor
+                    // 苹果设备：显示三个电量级别
+                    if device.isAppleDevice {
+                        // 左右耳电量
+                        var currentX = 35
+                        if let leftLevel = device.leftBatteryLevel {
+                            // 左耳图标 - 使用AirPods 3左耳图标
+                            let leftEarIcon = NSImageView(frame: NSRect(x: currentX, y: 4, width: 16, height: 16))
+                            // 尝试使用AirPods 3左耳图标
+                            let leftEarIconNames = ["airpod.gen3.left", "airpods.gen3", "airpods", "headphones"]
+                            var foundLeftIcon = false
+                            
+                            for iconName in leftEarIconNames {
+                                if let earImage = NSImage(systemSymbolName: iconName, accessibilityDescription: "AirPods 3 Left") {
+                                    earImage.isTemplate = true
+                                    leftEarIcon.image = earImage
+                                    foundLeftIcon = true
+                                    print("使用AirPods左耳图标: \(iconName)")
+                                    break
+                                }
+                            }
+                            
+                            // 如果没有找到AirPods相关图标，使用通用耳机图标
+                            if !foundLeftIcon {
+                                if let earImage = NSImage(systemSymbolName: "headphones", accessibilityDescription: "Headphones") {
+                                    earImage.isTemplate = true
+                                    leftEarIcon.image = earImage
+                                    print("使用通用耳机图标")
+                                }
+                            }
+                            batteryView.addSubview(leftEarIcon)
+                            
+                            let leftLevelLabel = NSTextField(frame: NSRect(x: currentX + 16, y: 0, width: 50, height: 20))
+                            leftLevelLabel.stringValue = "\(leftLevel)%"
+                            leftLevelLabel.isBezeled = false
+                            leftLevelLabel.isEditable = false
+                            leftLevelLabel.backgroundColor = .clear
+                            leftLevelLabel.textColor = .secondaryLabelColor
+                            batteryView.addSubview(leftLevelLabel)
+                            currentX += 55
                         }
                         
-                        batteryIconView.addSubview(batteryFillView)
+                        if let rightLevel = device.rightBatteryLevel {
+                            // 右耳图标 - 使用AirPods 3右耳图标
+                            let rightEarIcon = NSImageView(frame: NSRect(x: currentX, y: 4, width: 16, height: 16))
+                            // 尝试使用AirPods 3右耳图标
+                            let rightEarIconNames = ["airpod.gen3.right", "airpods.gen3", "airpods", "headphones"]
+                            var foundRightIcon = false
+                            
+                            for iconName in rightEarIconNames {
+                                if let earImage = NSImage(systemSymbolName: iconName, accessibilityDescription: "AirPods 3 Right") {
+                                    earImage.isTemplate = true
+                                    rightEarIcon.image = earImage
+                                    foundRightIcon = true
+                                    print("使用AirPods右耳图标: \(iconName)")
+                                    break
+                                }
+                            }
+                            
+                            // 如果没有找到AirPods相关图标，使用通用耳机图标
+                            if !foundRightIcon {
+                                if let earImage = NSImage(systemSymbolName: "headphones", accessibilityDescription: "Headphones") {
+                                    earImage.isTemplate = true
+                                    rightEarIcon.image = earImage
+                                    print("使用通用耳机图标")
+                                }
+                            }
+                            batteryView.addSubview(rightEarIcon)
+                            
+                            let rightLevelLabel = NSTextField(frame: NSRect(x: currentX + 16, y: 0, width: 50, height: 20))
+                            rightLevelLabel.stringValue = "\(rightLevel)%"
+                            rightLevelLabel.isBezeled = false
+                            rightLevelLabel.isEditable = false
+                            rightLevelLabel.backgroundColor = .clear
+                            rightLevelLabel.textColor = .secondaryLabelColor
+                            batteryView.addSubview(rightLevelLabel)
+                            currentX += 55
+                        }
+                        
+                        // 盒子电量
+                        if let caseLevel = device.caseBatteryLevel {
+                            // 盒子图标 - 使用AirPods 3充电盒图标
+                            let caseIcon = NSImageView(frame: NSRect(x: currentX, y: 4, width: 16, height: 16))
+                            // 尝试使用AirPods 3充电盒图标
+                            let caseIconNames = ["airpods.gen3.chargingcase.wireless.fill", "airpods.case", "case.fill"]
+                            var foundCaseIcon = false
+                            
+                            for iconName in caseIconNames {
+                                if let caseImage = NSImage(systemSymbolName: iconName, accessibilityDescription: "AirPods 3 Case") {
+                                    caseImage.isTemplate = true
+                                    caseIcon.image = caseImage
+                                    foundCaseIcon = true
+                                    print("使用AirPods充电盒图标: \(iconName)")
+                                    break
+                                }
+                            }
+                            
+                            // 如果没有找到充电盒图标，使用通用盒子图标
+                            if !foundCaseIcon {
+                                if let caseImage = NSImage(systemSymbolName: "case.fill", accessibilityDescription: "Case") {
+                                    caseImage.isTemplate = true
+                                    caseIcon.image = caseImage
+                                    print("使用通用盒子图标")
+                                }
+                            }
+                            batteryView.addSubview(caseIcon)
+                            
+                            let caseLevelLabel = NSTextField(frame: NSRect(x: currentX + 16, y: 0, width: 50, height: 20))
+                            caseLevelLabel.stringValue = "\(caseLevel)%"
+                            caseLevelLabel.isBezeled = false
+                            caseLevelLabel.isEditable = false
+                            caseLevelLabel.backgroundColor = .clear
+                            caseLevelLabel.textColor = .secondaryLabelColor
+                            batteryView.addSubview(caseLevelLabel)
+                        }
+                    } else {
+                        // 非苹果设备：显示单个电量
+                        // 耳机图标
+                        let earIcon = NSImageView(frame: NSRect(x: 40, y: 4, width: 16, height: 16))
+                        if let earImage = NSImage(systemSymbolName: "headphones", accessibilityDescription: "Headphones") {
+                            earImage.isTemplate = true
+                            earIcon.image = earImage
+                        }
+                        batteryView.addSubview(earIcon)
+                        
+                        // 添加电量数值
+                        let batteryValueLabel = NSTextField(frame: NSRect(x: 60, y: 0, width: 80, height: 20))
+                        batteryValueLabel.stringValue = device.batteryLevel != nil ? "\(device.batteryLevel!)%" : "-"
+                        batteryValueLabel.isBezeled = false
+                        batteryValueLabel.isEditable = false
+                        batteryValueLabel.backgroundColor = .clear
+                        batteryValueLabel.textColor = .secondaryLabelColor // 使用系统次要文本颜色
+                        batteryView.addSubview(batteryValueLabel)
                     }
-                    
-                    batteryView.addSubview(batteryIconView)
-                    
-                    // 添加电量数值
-                    let batteryValueLabel = NSTextField(frame: NSRect(x: 65, y: 0.5, width: 80, height: 20)) // 调整位置和大小
-                    batteryValueLabel.stringValue = device.batteryLevel != nil ? "\(device.batteryLevel!)%" : "-"
-                    batteryValueLabel.isBezeled = false
-                    batteryValueLabel.isEditable = false
-                    batteryValueLabel.backgroundColor = .clear
-                    batteryValueLabel.textColor = .secondaryLabelColor // 使用系统次要文本颜色
-                    batteryView.addSubview(batteryValueLabel)
                     
                     visualEffectView.addSubview(batteryView)
                     
                     ////////////////////////// 添加MAC地址
-                    let macLabel = NSTextField(frame: NSRect(x: 12, y: 23, width: 236, height: 16)) // 调整位置和大小，整体向上移动
+                    let macLabel = NSTextField(frame: NSRect(x: 12, y: 23, width: 236, height: 16)) // 调整位置，消除空行
                     macLabel.stringValue = "MAC地址: \(device.macAddress)"
                     macLabel.isBezeled = false
                     macLabel.isEditable = false
