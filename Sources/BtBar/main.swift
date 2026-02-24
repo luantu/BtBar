@@ -2035,20 +2035,8 @@ class StatusBarManager {
     }
     
     private func getSystemIconName(for deviceIconName: String) -> String {
-        switch deviceIconName {
-        case "airpods":
-            return "headphones"
-        case "mouse":
-            return "mouse"
-        case "keyboard":
-            return "keyboard"
-        case "headphones":
-            return "headphones"
-        case "speaker":
-            return "speaker"
-        default:
-            return "bluetooth"
-        }
+        // 直接返回传入的图标名称，不再进行映射
+        return deviceIconName
     }
     
     private func scaleImage(_ image: NSImage, toSize size: NSSize) -> NSImage {
@@ -2383,18 +2371,16 @@ class StatusBarManager {
             
             // 存储点击位置到StatusBarManager
             statusBarManager?.lastClickLocation = globalLocation
-            print("按钮点击位置 (全局鼠标位置): \(globalLocation)")
+
             
             // 同时打印其他坐标信息用于调试
             let windowLocation = event.locationInWindow
-            print("按钮点击位置 (窗口坐标): \(windowLocation)")
+
             
-            if let window = window {
-                let screenLocation = window.convertPoint(toScreen: windowLocation)
-                print("按钮点击位置 (窗口转换屏幕坐标): \(screenLocation)")
-                print("窗口位置: \(window.frame.origin)")
-                print("窗口大小: \(window.frame.size)")
-            }
+            // if let window = window {
+            //     let screenLocation = window.convertPoint(toScreen: windowLocation)
+            // }
+
             
             // 调用父类方法
             super.mouseDown(with: event)
@@ -3257,7 +3243,7 @@ class StatusBarManager {
         alert.addButton(withTitle: "取消")
         
         // 打印当前的点击位置
-        print("退出按钮点击位置: \(lastClickLocation ?? NSPoint(x: 0, y: 0))")
+        // print("退出按钮点击位置: \(lastClickLocation ?? NSPoint(x: 0, y: 0))")
         
         // 获取最后一次点击的位置
         if let clickLocation = lastClickLocation {
@@ -3269,8 +3255,8 @@ class StatusBarManager {
             
             // 打印屏幕信息
             if let screen = NSScreen.main {
-                print("屏幕大小: \(screen.frame.size)")
-                print("屏幕可视区域: \(screen.visibleFrame)")
+                // print("屏幕大小: \(screen.frame.size)")
+                // print("屏幕可视区域: \(screen.visibleFrame)")
             }
             
             // 计算警告框的位置：点击位置的正下方
@@ -3352,15 +3338,13 @@ class StatusBarManager {
         if lowerName.contains("airpod") {
             return "airpods"
         } else if lowerName.contains("mouse") {
-            return "mouse"
+            return "computermouse.fill"
         } else if lowerName.contains("keyboard") {
             return "keyboard"
-        } else if lowerName.contains("headphone") || lowerName.contains("headset") || lowerName.contains("bud") || lowerName.contains("earbud") {
-            return "headphones"
-        } else if lowerName.contains("speaker") {
-            return "speaker"
+        } else if lowerName.contains("headphone") || lowerName.contains("headset") || lowerName.contains("bud") || lowerName.contains("earbud") || lowerName.contains("speaker") {
+            return "beats.headphones"
         } else {
-            return "bluetooth"
+            return "questionmark.circle"
         }
     }
 }
