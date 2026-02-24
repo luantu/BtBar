@@ -4,6 +4,7 @@ import Combine
 import CoreBluetooth
 import UserNotifications
 import IOBluetooth
+import CoreImage
 
 // 全局工具函数
 func localTimeString() -> String {
@@ -960,13 +961,12 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
     
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String : Any], rssi RSSI: NSNumber) {
         // 增加详细的调试信息
-        let name = peripheral.name ?? "Unknown Device"
         // 屏蔽设备发现的详细日志
         
         // 检查是否已经添加过该设备
         if !peripherals.contains(where: { $0.identifier == peripheral.identifier }) {
             peripherals.append(peripheral)
-            print("[\(localTimeString())] Peripheral discovered: \(name)")
+            // print("[\(localTimeString())] Peripheral discovered: \(peripheral.name ?? \"Unknown Device\")")
         }
     }
     
@@ -1185,6 +1185,7 @@ class StatusBarManager {
     private var settingsWindow: NSWindow? // 存储设置窗口引用，避免被释放
     private var settingsWindowDelegate: WindowDelegate? // 存储窗口代理引用，确保生命周期与窗口一致
     private var settingsHostingController: NSViewController? // 存储设置窗口的hosting controller引用
+    private var lastClickLocation: NSPoint? // 存储最后一次鼠标点击位置
     
     init(bluetoothManager: BluetoothManager) {
         self.bluetoothManager = bluetoothManager
@@ -1367,7 +1368,7 @@ class StatusBarManager {
                 
                 if let button = deviceStatusItem.button {
                     // 确保按钮大小正确
-                    button.frame = NSRect(x: 0, y: 0, width: 18, height: 18)
+                    button.frame = NSRect(x: 0, y: 0, width: 20, height: 20)
                     
                     // 使用可复用的方法获取设备图标
                     if let deviceIcon = self.getDeviceIcon(for: device, size: NSSize(width: 16, height: 16), applyTemplateForDisconnected: false) {
@@ -1559,16 +1560,22 @@ class StatusBarManager {
         scaledImage.lockFocus()
         defer { scaledImage.unlockFocus() }
         
+        // 使用高质量插值以获得平滑效果
+        if let context = NSGraphicsContext.current?.cgContext {
+            context.interpolationQuality = .high
+        }
+        
         // 计算等比例缩放的尺寸
         let imageSize = image.size
         let widthRatio = size.width / imageSize.width
         let heightRatio = size.height / imageSize.height
         let scaleFactor = min(widthRatio, heightRatio)
         
-        let scaledWidth = imageSize.width * scaleFactor
-        let scaledHeight = imageSize.height * scaleFactor
-        let originX = (size.width - scaledWidth) / 2
-        let originY = (size.height - scaledHeight) / 2
+        // 确保坐标和尺寸是整数，避免浮点数坐标导致的模糊和锯齿
+        let scaledWidth = round(imageSize.width * scaleFactor)
+        let scaledHeight = round(imageSize.height * scaleFactor)
+        let originX = round((size.width - scaledWidth) / 2)
+        let originY = round((size.height - scaledHeight) / 2)
         
         // 绘制缩放后的图片
         let rect = NSRect(x: originX, y: originY, width: scaledWidth, height: scaledHeight)
@@ -1703,9 +1710,9 @@ class StatusBarManager {
             
             // 添加退出项
             if let quitImage = NSImage(systemSymbolName: "power", accessibilityDescription: "Quit") {
-                let quitItem = NSMenuItem(title: "", action: #selector(self.quitApp), keyEquivalent: "")
-                quitItem.target = self
-                quitItem.image = quitImage
+                let quitItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+                quitItem.target = nil
+                quitItem.image = nil
                 quitItem.isEnabled = true
                 // 创建自定义视图来控制图标的位置
                 let quitView = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 32))
@@ -1722,6 +1729,8 @@ class StatusBarManager {
                 quitButton.isBordered = false
                 quitButton.wantsLayer = true
                 quitButton.layer?.backgroundColor = NSColor.clear.cgColor
+                // 设置statusBarManager引用
+                quitButton.statusBarManager = self
                 // 添加鼠标跟踪区域
                 let trackingArea = NSTrackingArea(
                     rect: quitButton.bounds,
@@ -1783,9 +1792,9 @@ class StatusBarManager {
             
             // 添加退出项
             if let quitImage = NSImage(systemSymbolName: "power", accessibilityDescription: "Quit") {
-                let quitItem = NSMenuItem(title: "", action: #selector(self.quitApp), keyEquivalent: "")
-                quitItem.target = self
-                quitItem.image = quitImage
+                let quitItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+                quitItem.target = nil
+                quitItem.image = nil
                 quitItem.isEnabled = true
                 // 创建自定义视图来控制图标的位置
                 let quitView = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 32))
@@ -1802,6 +1811,8 @@ class StatusBarManager {
                 quitButton.isBordered = false
                 quitButton.wantsLayer = true
                 quitButton.layer?.backgroundColor = NSColor.clear.cgColor
+                // 设置statusBarManager引用
+                quitButton.statusBarManager = self
                 // 添加鼠标跟踪区域
                 let trackingArea = NSTrackingArea(
                     rect: quitButton.bounds,
@@ -1856,15 +1867,29 @@ class StatusBarManager {
     
     // 带鼠标悬停效果的按钮子类
     private class HoverableButton: NSButton {
-        static var lastClickLocation: NSPoint?
+        weak var statusBarManager: StatusBarManager?
         
         override func mouseDown(with event: NSEvent) {
+            // 直接使用全局鼠标位置，这是屏幕坐标
+            let globalLocation = NSEvent.mouseLocation
+            
+            // 存储点击位置到StatusBarManager
+            statusBarManager?.lastClickLocation = globalLocation
+            print("按钮点击位置 (全局鼠标位置): \(globalLocation)")
+            
+            // 同时打印其他坐标信息用于调试
+            let windowLocation = event.locationInWindow
+            print("按钮点击位置 (窗口坐标): \(windowLocation)")
+            
+            if let window = window {
+                let screenLocation = window.convertPoint(toScreen: windowLocation)
+                print("按钮点击位置 (窗口转换屏幕坐标): \(screenLocation)")
+                print("窗口位置: \(window.frame.origin)")
+                print("窗口大小: \(window.frame.size)")
+            }
+            
+            // 调用父类方法
             super.mouseDown(with: event)
-            // 捕获鼠标点击位置
-            let clickLocation = convert(event.locationInWindow, from: nil)
-            // 转换为屏幕坐标
-            let windowLocation = window?.convertPoint(toScreen: clickLocation) ?? clickLocation
-            HoverableButton.lastClickLocation = windowLocation
         }
         
         override func mouseEntered(with event: NSEvent) {
@@ -2100,19 +2125,58 @@ class StatusBarManager {
                 }
             }
             
-            // 使用模态方式显示文件选择器，确保它置顶显示
-            if let window = NSApp.mainWindow ?? NSApp.windows.first {
-                // 使用窗口作为父窗口，确保文件选择器置顶显示
-                openPanel.beginSheetModal(for: window) { response in
+            // 使用鼠标点击位置来显示文件选择器
+            if let clickLocation = lastClickLocation {
+                // 计算文件选择器的大小和位置
+                let panelSize = NSSize(width: 600, height: 400)
+                var panelFrame = NSRect(
+                    x: clickLocation.x - panelSize.width / 2,
+                    y: clickLocation.y - panelSize.height - 10,
+                    width: panelSize.width,
+                    height: panelSize.height
+                )
+                
+                // 确保文件选择器不会超出屏幕边界
+                if let screen = NSScreen.main {
+                    let screenFrame = screen.visibleFrame
+                    
+                    if panelFrame.origin.x < screenFrame.origin.x {
+                        panelFrame.origin.x = screenFrame.origin.x
+                    } else if panelFrame.origin.x + panelFrame.size.width > screenFrame.origin.x + screenFrame.size.width {
+                        panelFrame.origin.x = screenFrame.origin.x + screenFrame.size.width - panelFrame.size.width
+                    }
+                    
+                    if panelFrame.origin.y < screenFrame.origin.y {
+                        panelFrame.origin.y = screenFrame.origin.y
+                    } else if panelFrame.origin.y + panelFrame.size.height > screenFrame.origin.y + screenFrame.size.height {
+                        panelFrame.origin.y = screenFrame.origin.y + screenFrame.size.height - panelFrame.size.height
+                    }
+                }
+                
+                // 设置文件选择器的位置
+                openPanel.setFrame(panelFrame, display: true)
+                
+                // 显示文件选择器
+                openPanel.begin { response in
                     if response == .OK, let url = openPanel.url {
                         handleFileSelection(url)
                     }
                 }
             } else {
-                // 如果没有主窗口，使用默认方式显示
-                openPanel.begin { response in
-                    if response == .OK, let url = openPanel.url {
-                        handleFileSelection(url)
+                // 如果没有获取到点击位置，使用默认方式显示
+                if let window = NSApp.mainWindow ?? NSApp.windows.first {
+                    // 使用窗口作为父窗口，确保文件选择器置顶显示
+                    openPanel.beginSheetModal(for: window) { response in
+                        if response == .OK, let url = openPanel.url {
+                            handleFileSelection(url)
+                        }
+                    }
+                } else {
+                    // 如果没有主窗口，使用默认方式显示
+                    openPanel.begin { response in
+                        if response == .OK, let url = openPanel.url {
+                            handleFileSelection(url)
+                        }
                     }
                 }
             }
@@ -2126,12 +2190,54 @@ class StatusBarManager {
         alert.informativeText = message
         alert.addButton(withTitle: "OK")
         
-        // 尝试使用主窗口作为父窗口显示警告
-        if let window = NSApp.mainWindow ?? NSApp.windows.first {
-            alert.beginSheetModal(for: window, completionHandler: nil)
-        } else {
-            // 如果没有主窗口，使用默认方式显示
+        // 使用鼠标点击位置来显示警告框
+        if let clickLocation = lastClickLocation {
+            // 获取警告框窗口
+            let alertWindow = alert.window
+            
+            // 计算警告框的大小
+            let alertSize = alertWindow.frame.size
+            
+            // 计算警告框的位置：点击位置的正下方
+            let verticalOffset: CGFloat = 10 // 垂直距离
+            var alertFrame = NSRect(
+                x: clickLocation.x - alertSize.width / 2, // 水平居中
+                y: clickLocation.y - alertSize.height - verticalOffset, // 垂直下方
+                width: alertSize.width,
+                height: alertSize.height
+            )
+            
+            // 确保警告框不会超出屏幕边界
+            if let screen = NSScreen.main {
+                let screenFrame = screen.visibleFrame
+                
+                if alertFrame.origin.x < screenFrame.origin.x {
+                    alertFrame.origin.x = screenFrame.origin.x
+                } else if alertFrame.origin.x + alertFrame.size.width > screenFrame.origin.x + screenFrame.size.width {
+                    alertFrame.origin.x = screenFrame.origin.x + screenFrame.size.width - alertFrame.size.width
+                }
+                
+                if alertFrame.origin.y < screenFrame.origin.y {
+                    alertFrame.origin.y = screenFrame.origin.y
+                } else if alertFrame.origin.y + alertFrame.size.height > screenFrame.origin.y + screenFrame.size.height {
+                    alertFrame.origin.y = screenFrame.origin.y + screenFrame.size.height - alertFrame.size.height
+                }
+            }
+            
+            // 设置警告框的位置
+            alertWindow.setFrame(alertFrame, display: true)
+            alertWindow.level = .floating
+            alertWindow.makeKeyAndOrderFront(nil)
+            
+            // 显示警告框
             alert.runModal()
+        } else {
+            // 如果没有获取到点击位置，使用默认方式显示
+            if let window = NSApp.mainWindow ?? NSApp.windows.first {
+                alert.beginSheetModal(for: window, completionHandler: nil)
+            } else {
+                alert.runModal()
+            }
         }
     }
     
@@ -2142,12 +2248,54 @@ class StatusBarManager {
         alert.informativeText = message
         alert.addButton(withTitle: "OK")
         
-        // 尝试使用主窗口作为父窗口显示警告
-        if let window = NSApp.mainWindow ?? NSApp.windows.first {
-            alert.beginSheetModal(for: window, completionHandler: nil)
-        } else {
-            // 如果没有主窗口，使用默认方式显示
+        // 使用鼠标点击位置来显示警告框
+        if let clickLocation = lastClickLocation {
+            // 获取警告框窗口
+            let alertWindow = alert.window
+            
+            // 计算警告框的大小
+            let alertSize = alertWindow.frame.size
+            
+            // 计算警告框的位置：点击位置的正下方
+            let verticalOffset: CGFloat = 10 // 垂直距离
+            var alertFrame = NSRect(
+                x: clickLocation.x - alertSize.width / 2, // 水平居中
+                y: clickLocation.y - alertSize.height - verticalOffset, // 垂直下方
+                width: alertSize.width,
+                height: alertSize.height
+            )
+            
+            // 确保警告框不会超出屏幕边界
+            if let screen = NSScreen.main {
+                let screenFrame = screen.visibleFrame
+                
+                if alertFrame.origin.x < screenFrame.origin.x {
+                    alertFrame.origin.x = screenFrame.origin.x
+                } else if alertFrame.origin.x + alertFrame.size.width > screenFrame.origin.x + screenFrame.size.width {
+                    alertFrame.origin.x = screenFrame.origin.x + screenFrame.size.width - alertFrame.size.width
+                }
+                
+                if alertFrame.origin.y < screenFrame.origin.y {
+                    alertFrame.origin.y = screenFrame.origin.y
+                } else if alertFrame.origin.y + alertFrame.size.height > screenFrame.origin.y + screenFrame.size.height {
+                    alertFrame.origin.y = screenFrame.origin.y + screenFrame.size.height - alertFrame.size.height
+                }
+            }
+            
+            // 设置警告框的位置
+            alertWindow.setFrame(alertFrame, display: true)
+            alertWindow.level = .floating
+            alertWindow.makeKeyAndOrderFront(nil)
+            
+            // 显示警告框
             alert.runModal()
+        } else {
+            // 如果没有获取到点击位置，使用默认方式显示
+            if let window = NSApp.mainWindow ?? NSApp.windows.first {
+                alert.beginSheetModal(for: window, completionHandler: nil)
+            } else {
+                alert.runModal()
+            }
         }
     }
     
@@ -2190,15 +2338,67 @@ class StatusBarManager {
             alert.addButton(withTitle: "OK")
             alert.addButton(withTitle: "Cancel")
             
-            // 显示对话框
-            let response = alert.runModal()
-            
-            if response == .alertFirstButtonReturn { // OK 按钮
-                let newName = inputTextField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !newName.isEmpty && newName != device.name {
-                    // 更新设备名称
-                    bluetoothManager.updateDeviceName(device, newName: newName)
-                    print("Device renamed: \(device.name) -> \(newName)")
+            // 使用鼠标点击位置来显示对话框
+            if let clickLocation = lastClickLocation {
+                // 获取对话框窗口
+                let alertWindow = alert.window
+                
+                // 计算对话框的大小
+                let alertSize = alertWindow.frame.size
+                
+                // 计算对话框的位置：点击位置的正下方
+                let verticalOffset: CGFloat = 10 // 垂直距离
+                var alertFrame = NSRect(
+                    x: clickLocation.x - alertSize.width / 2, // 水平居中
+                    y: clickLocation.y - alertSize.height - verticalOffset, // 垂直下方
+                    width: alertSize.width,
+                    height: alertSize.height
+                )
+                
+                // 确保对话框不会超出屏幕边界
+                if let screen = NSScreen.main {
+                    let screenFrame = screen.visibleFrame
+                    
+                    if alertFrame.origin.x < screenFrame.origin.x {
+                        alertFrame.origin.x = screenFrame.origin.x
+                    } else if alertFrame.origin.x + alertFrame.size.width > screenFrame.origin.x + screenFrame.size.width {
+                        alertFrame.origin.x = screenFrame.origin.x + screenFrame.size.width - alertFrame.size.width
+                    }
+                    
+                    if alertFrame.origin.y < screenFrame.origin.y {
+                        alertFrame.origin.y = screenFrame.origin.y
+                    } else if alertFrame.origin.y + alertFrame.size.height > screenFrame.origin.y + screenFrame.size.height {
+                        alertFrame.origin.y = screenFrame.origin.y + screenFrame.size.height - alertFrame.size.height
+                    }
+                }
+                
+                // 设置对话框的位置
+                alertWindow.setFrame(alertFrame, display: true)
+                alertWindow.level = .floating
+                alertWindow.makeKeyAndOrderFront(nil)
+                
+                // 显示对话框
+                let response = alert.runModal()
+                
+                if response == .alertFirstButtonReturn { // OK 按钮
+                    let newName = inputTextField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !newName.isEmpty && newName != device.name {
+                        // 更新设备名称
+                        bluetoothManager.updateDeviceName(device, newName: newName)
+                        print("Device renamed: \(device.name) -> \(newName)")
+                    }
+                }
+            } else {
+                // 如果没有获取到点击位置，使用默认方式显示
+                let response = alert.runModal()
+                
+                if response == .alertFirstButtonReturn { // OK 按钮
+                    let newName = inputTextField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !newName.isEmpty && newName != device.name {
+                        // 更新设备名称
+                        bluetoothManager.updateDeviceName(device, newName: newName)
+                        print("Device renamed: \(device.name) -> \(newName)")
+                    }
                 }
             }
         }
@@ -2466,15 +2666,25 @@ class StatusBarManager {
         alert.addButton(withTitle: "退出")
         alert.addButton(withTitle: "取消")
         
+        // 打印当前的点击位置
+        print("退出按钮点击位置: \(lastClickLocation ?? NSPoint(x: 0, y: 0))")
+        
         // 获取最后一次点击的位置
-        if let clickLocation = HoverableButton.lastClickLocation {
-            // 创建一个自定义窗口来显示警告框
+        if let clickLocation = lastClickLocation {
+            // 获取警告框窗口
             let alertWindow = alert.window
             
             // 计算警告框的大小
             let alertSize = alertWindow.frame.size
             
+            // 打印屏幕信息
+            if let screen = NSScreen.main {
+                print("屏幕大小: \(screen.frame.size)")
+                print("屏幕可视区域: \(screen.visibleFrame)")
+            }
+            
             // 计算警告框的位置：点击位置的正下方
+            // 注意：在macOS中，NSEvent.mouseLocation的原点在屏幕左下角
             let verticalOffset: CGFloat = 10 // 垂直距离
             var alertFrame = NSRect(
                 x: clickLocation.x - alertSize.width / 2, // 水平居中
@@ -2504,15 +2714,23 @@ class StatusBarManager {
             }
             
             // 设置警告框的位置
-            alertWindow.setFrame(alertFrame, display: false)
+            alertWindow.setFrame(alertFrame, display: true)
+            print("警告框位置: \(alertFrame)")
             
-            // 显示警告框并处理用户响应
+            // 强制设置窗口级别，确保它显示在菜单上方
+            alertWindow.level = .floating
+            
+            // 显示警告框
+            alertWindow.makeKeyAndOrderFront(nil)
+            
+            // 等待用户响应
             let response = alert.runModal()
             if response == .alertFirstButtonReturn { // 用户点击了"退出"按钮
                 NSApplication.shared.terminate(nil)
             }
         } else {
             // 如果没有获取到点击位置，使用默认方式显示
+            print("没有获取到点击位置，使用默认方式显示")
             // 尝试使用主窗口作为父窗口显示警告框
             if let window = NSApp.mainWindow ?? NSApp.windows.first {
                 // 使用sheet方式显示，确保置顶
