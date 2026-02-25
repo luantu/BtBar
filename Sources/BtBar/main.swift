@@ -1317,7 +1317,8 @@ class StatusBarManager {
             // 更新或添加需要显示的设备图标
             for device in devicesToShow {
 
-                
+
+
                 // 检查设备状态是否发生变化
                 let currentState = (isConnected: device.isConnected, customIconName: device.customIconName, batteryLevel: device.batteryLevel, caseBatteryLevel: device.caseBatteryLevel, leftBatteryLevel: device.leftBatteryLevel, rightBatteryLevel: device.rightBatteryLevel)
                 let lastState = self.lastDeviceStates[device.id]
@@ -1341,27 +1342,116 @@ class StatusBarManager {
                     // 使用现有的状态栏图标
                     deviceStatusItem = existingItem.statusItem
                 } else {
-                    // 创建一个新的状态栏图标
-                    deviceStatusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+                    // 创建一个新的状态栏图标，使用可变长度以容纳电量文本
+                    deviceStatusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
                     self.statusItems.append(deviceStatusItem)
                 }
                 
                 if let button = deviceStatusItem.button {
-                    // 确保按钮大小正确
-                    button.frame = NSRect(x: 0, y: 0, width: 20, height: 20)
+                    // 计算设备电量，使用与气泡详情相同的逻辑
+                    var batteryLevel: Int = 0
+                    if device.isAppleDevice {
+                        // 苹果设备的电量计算逻辑
+                        if let leftLevel = device.leftBatteryLevel, let rightLevel = device.rightBatteryLevel {
+                            // 左右耳都有，使用平均值
+                            batteryLevel = (leftLevel + rightLevel) / 2
+                        } else if let leftLevel = device.leftBatteryLevel {
+                            // 只有左耳，使用左耳电量
+                            batteryLevel = leftLevel
+                        } else if let rightLevel = device.rightBatteryLevel {
+                            // 只有右耳，使用右耳电量
+                            batteryLevel = rightLevel
+                        } else {
+                            // 没有电量信息
+                            batteryLevel = 0
+                        }
+                    } else {
+                        // 非苹果设备使用通用电量
+                        batteryLevel = device.batteryLevel ?? 0
+                    }
                     
-                    // 使用可复用的方法获取设备图标，使用模板模式让系统根据主题自动调整颜色
-                    if let deviceIcon = self.getDeviceIcon(for: device, size: NSSize(width: 16, height: 16), applyTemplate: true) {
-                        button.image = deviceIcon
-                        // 确保图片显示模式正确
-                        button.imageScaling = .scaleProportionallyUpOrDown
+                    // 清除按钮的现有子视图
+                    button.subviews.forEach { $0.removeFromSuperview() }
+
+                    // 添加设备图标，宽度固定为24，高度自动
+                    let buttonHeight: CGFloat = 26
+                    let iconWidth: CGFloat = 24
+                    
+                    // 计算电量文本宽度
+                    let batteryText = "\(batteryLevel)%"
+                    let textAttributes: [NSAttributedString.Key: Any] = [
+                        .font: NSFont.systemFont(ofSize: 12),
+                        .foregroundColor: NSColor.controlTextColor
+                    ]
+                    let attributedText = NSAttributedString(string: batteryText, attributes: textAttributes)
+                    let textSize = attributedText.size()
+                    let textWidth = textSize.width + 5 // 增加一些边距
+                    
+                    // 左右边距
+                    let margin: CGFloat = 5
+                    
+                    // 计算总宽度
+                    let totalWidth = margin + iconWidth + textWidth + margin
+                    
+                    // 创建一个包含图标和电量的复合视图，高度与按钮一致
+                    let compositeView = NSView(frame: NSRect(x: 0, y: 0, width: totalWidth, height: buttonHeight))
+                    
+                    // 先获取图标，然后根据实际图标大小计算居中位置
+                    if let deviceIcon = self.getDeviceIcon(for: device, size: NSSize(width: iconWidth, height: iconWidth), applyTemplate: true) {
+                        // 获取实际图标高度
+                        let actualIconHeight = deviceIcon.size.height
+                        // 计算图标在复合视图中上下居中的位置
+                        let iconY = (buttonHeight - actualIconHeight) / 2
+                        let iconView = NSImageView(frame: NSRect(x: margin, y: iconY + 2, width: iconWidth, height: actualIconHeight))
+                        iconView.image = deviceIcon
+                        // 关键设置：确保图标在视图中居中显示，保持横纵比
+                        iconView.imageScaling = .scaleProportionallyUpOrDown
+                        iconView.alignment = .center
+                        // 确保NSImageView的cell也正确设置
+                        if let cell = iconView.cell as? NSImageCell {
+                            cell.imageScaling = .scaleProportionallyUpOrDown
+                            cell.alignment = .center
+                        }
+                        compositeView.addSubview(iconView)
                     } else {
                         // 如果所有图标都不可用，使用随机图标
                         let randomIcon = self.generateRandomIcon()
                         // 使用模板模式让系统根据主题自动调整颜色
                         randomIcon.isTemplate = true
-                        button.image = randomIcon
+                        // 计算图标在复合视图中上下居中的位置
+                        let actualIconHeight = randomIcon.size.height
+                        let iconY = (buttonHeight - actualIconHeight) / 2
+                        let iconView = NSImageView(frame: NSRect(x: margin, y: iconY + 2, width: iconWidth, height: actualIconHeight))
+                        iconView.image = randomIcon
+                        // 关键设置：确保图标在视图中居中显示，保持横纵比
+                        iconView.imageScaling = .scaleProportionallyUpOrDown
+                        iconView.alignment = .center
+                        // 确保NSImageView的cell也正确设置
+                        if let cell = iconView.cell as? NSImageCell {
+                            cell.imageScaling = .scaleProportionallyUpOrDown
+                            cell.alignment = .center
+                        }
+                        compositeView.addSubview(iconView)
                     }
+                    
+                    // 添加电量文本
+                    let batteryLabel = NSTextField(labelWithString: batteryText)
+                    // 计算电量文本在复合视图中上下居中的位置
+                    let textHeight: CGFloat = 24 // 文本高度
+                    let textY = (buttonHeight - textHeight) / 2
+                    batteryLabel.frame = NSRect(x: margin + iconWidth, y: textY - 3, width: textWidth, height: textHeight)
+                    batteryLabel.attributedStringValue = attributedText
+                    batteryLabel.alignment = .left
+                    batteryLabel.isBezeled = false
+                    batteryLabel.isEditable = false
+                    batteryLabel.drawsBackground = false
+                    compositeView.addSubview(batteryLabel)
+                    
+                    // 确保按钮大小正确，宽度自适应内容
+                    button.frame = NSRect(x: 0, y: 0, width: totalWidth, height: buttonHeight)
+                    
+                    // 将复合视图设置为按钮的视图
+                    button.addSubview(compositeView)
                     
                     // 为设备图标设置不同的action，点击时显示设备详情信息
                     button.action = #selector(self.showDeviceDetails)
@@ -1451,8 +1541,8 @@ class StatusBarManager {
         if let customIconName = device.customIconName {
             // 尝试使用用户选择的系统符号，使用symbolConfiguration来设置大小
             if let image = NSImage(systemSymbolName: customIconName, accessibilityDescription: device.name) {
-                // 使用symbolConfiguration设置图标大小
-                let configuration = NSImage.SymbolConfiguration(pointSize: size.height, weight: .regular)
+                // 使用symbolConfiguration设置图标大小和缩放
+                let configuration = NSImage.SymbolConfiguration(pointSize: size.height, weight: .regular, scale: .medium)
                 if let configuredImage = image.withSymbolConfiguration(configuration) {
                     // 根据参数设置是否使用模板模式
                     configuredImage.isTemplate = applyTemplate
@@ -1465,8 +1555,8 @@ class StatusBarManager {
         // 如果没有自定义图标或自定义图标不可用，使用系统图标
         let systemIconName = getSystemIconName(for: device.defaultIconName)
         if let image = NSImage(systemSymbolName: systemIconName, accessibilityDescription: device.name) {
-            // 使用symbolConfiguration设置图标大小
-            let configuration = NSImage.SymbolConfiguration(pointSize: size.height, weight: .regular)
+            // 使用symbolConfiguration设置图标大小和缩放
+            let configuration = NSImage.SymbolConfiguration(pointSize: size.height, weight: .regular, scale: .medium)
             if let configuredImage = image.withSymbolConfiguration(configuration) {
                 // 根据参数设置是否使用模板模式
                 configuredImage.isTemplate = applyTemplate
