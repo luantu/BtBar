@@ -1227,6 +1227,7 @@ class StatusBarManager {
     private var settingsWindowDelegate: WindowDelegate? // 存储窗口代理引用，确保生命周期与窗口一致
     private var settingsHostingController: NSViewController? // 存储设置窗口的hosting controller引用
     private var lastClickLocation: NSPoint? // 存储最后一次鼠标点击位置
+    private var buttonActions: [NSButton: () -> Void] = [:] // 存储按钮和对应的动作闭包
     
     init(bluetoothManager: BluetoothManager) {
         self.bluetoothManager = bluetoothManager
@@ -2761,16 +2762,8 @@ class StatusBarManager {
             if let button = deviceInfo.statusItem.button, button === sender {
                 let device = deviceInfo.device
                 
-                // 检查是否是右键点击
-                let event = NSApp.currentEvent
-                if event?.type == .rightMouseDown || (event?.type == .leftMouseDown && event?.modifierFlags.contains(.control) == true) {
-                    // 右键点击，显示设备的二级菜单
-                    let menu = createDeviceSubmenu(device: device)
-                    NSMenu.popUpContextMenu(menu, with: event!, for: button)
-                } else {
-                    // 左键点击，显示设备详情
-                    showDeviceDetailsForDevice(device)
-                }
+                // 无论左键还是右键点击，都显示设备详情
+                showDeviceDetailsForDevice(device)
                 break
             }
         }
@@ -2852,15 +2845,15 @@ class StatusBarManager {
                     // 创建新的气泡
                     let popover = NSPopover()
                     popover.behavior = .transient // 点击外部时自动关闭
-                    // 统一气泡大小，因为电量显示布局已统一
-                    let popoverHeight = 140.0 
-                    popover.contentSize = NSSize(width: 220, height: popoverHeight) // 调整尺寸以适应电池图标
+                    // 增加气泡高度，以容纳底部的操作按钮
+                    let popoverHeight = 150.0 
+                    popover.contentSize = NSSize(width: 220, height: popoverHeight) // 调整尺寸以适应电池图标和操作按钮
                     popover.animates = true // 添加动画效果
                     // 确保气泡显示到最上层
                     popover.appearance = NSAppearance(named: .darkAqua) // 使用暗色外观，确保与菜单背景一致
                     
                     // 创建磨砂玻璃效果的背景视图
-                    let visualEffectView = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: 220, height: popoverHeight)) // 调整尺寸以适应电池图标
+                    let visualEffectView = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: 220, height: popoverHeight)) // 调整尺寸以适应电池图标和操作按钮
                     visualEffectView.wantsLayer = true
                     visualEffectView.material = .menu // 使用与菜单相同的材质
                     visualEffectView.blendingMode = .withinWindow // 更改混合模式以获得更好的毛玻璃效果
@@ -2868,8 +2861,22 @@ class StatusBarManager {
                     // 强制设置外观为暗色，确保与菜单背景一致
                     visualEffectView.appearance = NSAppearance(named: .darkAqua)
                     
+                    // 定义垂直间距变量，用于调整弹出气泡各个项目之间的间距
+                    let verticalSpace: CGFloat = 5
+                    
+                    // 定义元素高度
+                    let iconHeight: CGFloat = 34
+                    let nameHeight: CGFloat = 18
+                    let statusHeight: CGFloat = 16
+                    let macHeight: CGFloat = 16
+                    let batteryHeight: CGFloat = 20
+                    
+                    // 计算起始位置（从顶部开始）
+                    let topPadding: CGFloat = 10
+                    var currentY: CGFloat = topPadding
+                    
                     /////////////////////// 添加设备图标
-                    let iconImageView = NSImageView(frame: NSRect(x: 12, y: 92, width: 34, height: 34)) // 调整位置和大小，放大1.2倍
+                    let iconImageView = NSImageView(frame: NSRect(x: 12, y: popoverHeight - currentY - iconHeight, width: 34, height: 34))
                     // 使用可复用的方法获取设备图标
                     if let deviceIcon = self.getDeviceIcon(for: device, size: NSSize(width: 34, height: 34), applyTemplate: true) {
                         iconImageView.image = deviceIcon
@@ -2916,13 +2923,13 @@ class StatusBarManager {
                         }
                         
                         // 创建电量指示器视图
-                        let batteryIndicator = BatteryCircleView(frame: NSRect(x: 220 - 50, y: 90, width: 40, height: 40))
+                        let batteryIndicator = BatteryCircleView(frame: NSRect(x: 220 - 50, y: popoverHeight - currentY - 40, width: 40, height: 40))
                         batteryIndicator.batteryLevel = batteryLevel
                         visualEffectView.addSubview(batteryIndicator)
                     }
                     
                     ////////////////////// 添加设备名称
-                    let nameLabel = NSTextField(frame: NSRect(x: 46, y: 99, width: 194, height: 18)) // 调整位置和大小，整体向上移动
+                    let nameLabel = NSTextField(frame: NSRect(x: 46, y: popoverHeight - currentY - nameHeight - 10, width: 194, height: 18))
                     nameLabel.stringValue = device.name
                     nameLabel.isBezeled = false
                     nameLabel.isEditable = false
@@ -2931,8 +2938,11 @@ class StatusBarManager {
                     nameLabel.font = NSFont.boldSystemFont(ofSize: 14)
                     visualEffectView.addSubview(nameLabel)
                     
+                    // 更新当前Y位置
+                    currentY += max(iconHeight, nameHeight) + verticalSpace
+                    
                     /////////////////// 添加连接状态
-                    let statusLabel = NSTextField(frame: NSRect(x: 12, y: 69, width: 236, height: 16)) // 调整位置和大小，整体向上移动
+                    let statusLabel = NSTextField(frame: NSRect(x: 12, y: popoverHeight - currentY - statusHeight, width: 236, height: 16))
                     statusLabel.stringValue = "连接状态: \(device.isConnected ? "已连接" : "未连接")"
                     statusLabel.isBezeled = false
                     statusLabel.isEditable = false
@@ -2940,8 +2950,23 @@ class StatusBarManager {
                     statusLabel.textColor = .secondaryLabelColor // 使用系统次要文本颜色
                     visualEffectView.addSubview(statusLabel)
                     
+                    // 更新当前Y位置
+                    currentY += statusHeight + verticalSpace
+                    
+                    ////////////////////////// 添加MAC地址
+                    let macLabel = NSTextField(frame: NSRect(x: 12, y: popoverHeight - currentY - macHeight, width: 236, height: 16))
+                    macLabel.stringValue = "MAC地址: \(device.macAddress)"
+                    macLabel.isBezeled = false
+                    macLabel.isEditable = false
+                    macLabel.backgroundColor = .clear
+                    macLabel.textColor = .secondaryLabelColor // 使用系统次要文本颜色
+                    visualEffectView.addSubview(macLabel)
+                    
+                    // 更新当前Y位置
+                    currentY += macHeight + verticalSpace
+                    
                     ////////////////////// 添加电量信息和电池图标
-                    let batteryView = NSView(frame: NSRect(x: 12, y: 38, width: 236, height: 20)) // 统一位置和大小
+                    let batteryView = NSView(frame: NSRect(x: 12, y: popoverHeight - currentY - batteryHeight, width: 236, height: 20))
                     
                     // 添加电量标签
                     let batteryLabel = NSTextField(frame: NSRect(x: 0, y: 0, width: 35, height: 20))
@@ -3082,14 +3107,113 @@ class StatusBarManager {
                     
                     visualEffectView.addSubview(batteryView)
                     
-                    ////////////////////////// 添加MAC地址
-                    let macLabel = NSTextField(frame: NSRect(x: 12, y: 15, width: 236, height: 16)) // 调整位置，消除空行
-                    macLabel.stringValue = "MAC地址: \(device.macAddress)"
-                    macLabel.isBezeled = false
-                    macLabel.isEditable = false
-                    macLabel.backgroundColor = .clear
-                    macLabel.textColor = .secondaryLabelColor // 使用系统次要文本颜色
-                    visualEffectView.addSubview(macLabel)
+                    ////////////////////////// 添加操作按钮
+                    let buttonView = NSView(frame: NSRect(x: 0, y: 0, width: 220, height: 40))
+                    
+                    // Disconnect 按钮
+                    if device.isConnected {
+                        let disconnectButton = NSButton(frame: NSRect(x: 20, y: 5, width: 30, height: 30))
+                        disconnectButton.setButtonType(.momentaryPushIn)
+                        disconnectButton.bezelStyle = .texturedRounded
+                        if let image = NSImage(systemSymbolName: "microphone.slash", accessibilityDescription: "Disconnect") {
+                            image.isTemplate = true
+                            disconnectButton.image = image
+                        }
+                        disconnectButton.toolTip = "Disconnect"
+                        // 创建一个闭包来处理按钮点击事件
+                        let disconnectAction: () -> Void = { [weak self] in
+                            self?.bluetoothManager.disconnectDevice(device)
+                        }
+                        // 使用目标-动作模式，将设备信息存储在按钮的 tag 中
+                        disconnectButton.tag = buttonView.subviews.count
+                        buttonView.addSubview(disconnectButton)
+                        // 为按钮添加点击事件
+                        disconnectButton.target = self
+                        disconnectButton.action = #selector(self.buttonClicked(_:))
+                        // 存储按钮和对应的动作
+                        self.buttonActions[disconnectButton] = disconnectAction
+                    }
+                    
+                    // Change Icon 按钮
+                    let changeIconButton = NSButton(frame: NSRect(x: 70, y: 5, width: 30, height: 30))
+                    changeIconButton.setButtonType(.momentaryPushIn)
+                    changeIconButton.bezelStyle = .texturedRounded
+                    if let image = NSImage(systemSymbolName: "paintbrush", accessibilityDescription: "Change Icon") {
+                        image.isTemplate = true
+                        changeIconButton.image = image
+                    }
+                    changeIconButton.toolTip = "Change Icon"
+                    // 创建一个闭包来处理按钮点击事件
+                    let changeIconAction: () -> Void = { [weak self] in
+                        // 创建一个临时的 NSMenuItem 来传递设备信息
+                        let menuItem = NSMenuItem()
+                        menuItem.representedObject = device
+                        self?.changeDeviceIcon(menuItem)
+                    }
+                    // 使用目标-动作模式，将设备信息存储在按钮的 tag 中
+                    changeIconButton.tag = buttonView.subviews.count
+                    buttonView.addSubview(changeIconButton)
+                    // 为按钮添加点击事件
+                    changeIconButton.target = self
+                    changeIconButton.action = #selector(self.buttonClicked(_:))
+                    // 存储按钮和对应的动作
+                    self.buttonActions[changeIconButton] = changeIconAction
+                    
+                    // Hide Status Bar Icon 按钮
+                    let hideIconButton = NSButton(frame: NSRect(x: 120, y: 5, width: 30, height: 30))
+                    hideIconButton.setButtonType(.momentaryPushIn)
+                    hideIconButton.bezelStyle = .texturedRounded
+                    let shouldShowIcon = device.isConnected && (self.showDeviceIcons[device.id] ?? true)
+                    let hideIconName = shouldShowIcon ? "eye.slash" : "eye"
+                    if let image = NSImage(systemSymbolName: hideIconName, accessibilityDescription: shouldShowIcon ? "Hide Status Bar Icon" : "Show Status Bar Icon") {
+                        image.isTemplate = true
+                        hideIconButton.image = image
+                    }
+                    hideIconButton.toolTip = shouldShowIcon ? "Hide Status Bar Icon" : "Show Status Bar Icon"
+                    // 创建一个闭包来处理按钮点击事件
+                    let hideIconAction: () -> Void = { [weak self] in
+                        // 创建一个临时的 NSMenuItem 来传递设备信息
+                        let menuItem = NSMenuItem()
+                        menuItem.representedObject = device
+                        self?.toggleDeviceStatusIcon(menuItem)
+                    }
+                    // 使用目标-动作模式，将设备信息存储在按钮的 tag 中
+                    hideIconButton.tag = buttonView.subviews.count
+                    buttonView.addSubview(hideIconButton)
+                    // 为按钮添加点击事件
+                    hideIconButton.target = self
+                    hideIconButton.action = #selector(self.buttonClicked(_:))
+                    // 存储按钮和对应的动作
+                    self.buttonActions[hideIconButton] = hideIconAction
+                    
+                    // Set as Default Audio Device 按钮
+                    if device.isConnected {
+                        let audioDeviceButton = NSButton(frame: NSRect(x: 170, y: 5, width: 30, height: 30))
+                        audioDeviceButton.setButtonType(.momentaryPushIn)
+                        audioDeviceButton.bezelStyle = .texturedRounded
+                        if let image = NSImage(systemSymbolName: "music.microphone.circle", accessibilityDescription: "Set as Default Audio Device") {
+                            image.isTemplate = true
+                            audioDeviceButton.image = image
+                        }
+                        audioDeviceButton.toolTip = "Set as Default Audio Device"
+                        // 创建一个闭包来处理按钮点击事件
+                        let audioDeviceAction: () -> Void = { [weak self] in
+                            // 创建一个临时的 NSMenuItem 来传递设备信息
+                            let menuItem = NSMenuItem()
+                            menuItem.representedObject = device
+                            self?.setDefaultAudioDeviceForMenuItem(menuItem)
+                        }
+                        // 使用目标-动作模式，将设备信息存储在按钮的 tag 中
+                        audioDeviceButton.tag = buttonView.subviews.count
+                        buttonView.addSubview(audioDeviceButton)
+                        // 为按钮添加点击事件
+                        audioDeviceButton.target = self
+                        audioDeviceButton.action = #selector(self.buttonClicked(_:))
+                        // 存储按钮和对应的动作
+                        self.buttonActions[audioDeviceButton] = audioDeviceAction
+                    }
+                    
+                    visualEffectView.addSubview(buttonView)
                     
                     // 创建内容视图控制器
                     let contentViewController = NSViewController()
@@ -3279,6 +3403,15 @@ class StatusBarManager {
                     NSApplication.shared.terminate(nil)
                 }
             }
+        }
+    }
+    
+
+    
+    // 按钮点击事件处理方法
+    @objc private func buttonClicked(_ sender: NSButton) {
+        if let action = buttonActions[sender] {
+            action()
         }
     }
     
