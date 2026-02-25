@@ -2361,6 +2361,65 @@ class StatusBarManager {
         }
     }
     
+    // 电量圆形指示器视图类
+    internal class BatteryCircleView: NSView {
+        var batteryLevel: Int = 0 {
+            didSet {
+                needsDisplay = true
+            }
+        }
+        
+        override func draw(_ dirtyRect: NSRect) {
+            super.draw(dirtyRect)
+            
+            // 获取绘图上下文
+            guard let context = NSGraphicsContext.current?.cgContext else { return }
+            
+            // 计算中心点和半径
+            let center = CGPoint(x: bounds.width / 2, y: bounds.height / 2)
+            let radius = min(bounds.width, bounds.height) / 2 - 3
+            
+            // 绘制灰色背景圆环
+            context.setStrokeColor(NSColor.lightGray.cgColor)
+            context.setLineWidth(5)
+            context.addArc(center: center, radius: radius, startAngle: 0, endAngle: 2 * .pi, clockwise: false)
+            context.strokePath()
+            
+            // 根据电量确定颜色
+            var fillColor: NSColor
+            if batteryLevel > 50 {
+                fillColor = .systemGreen
+            } else if batteryLevel > 15 {
+                fillColor = .systemYellow
+            } else {
+                fillColor = .systemRed
+            }
+            
+            // 绘制填充部分
+            context.setStrokeColor(fillColor.cgColor)
+            context.setLineWidth(5)
+            let endAngle = -(.pi / 2) + (2 * .pi * CGFloat(batteryLevel) / 100)
+            context.addArc(center: center, radius: radius, startAngle: -.pi / 2, endAngle: endAngle, clockwise: false)
+            context.strokePath()
+            
+            // 绘制电量文本
+            let text = "\(batteryLevel)%"
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 9),
+                .foregroundColor: NSColor.white
+            ]
+            let attributedText = NSAttributedString(string: text, attributes: attributes)
+            let textSize = attributedText.size()
+            let textRect = NSRect(
+                x: center.x - textSize.width / 2,
+                y: center.y - textSize.height / 2,
+                width: textSize.width,
+                height: textSize.height
+            )
+            attributedText.draw(in: textRect)
+        }
+    }
+    
     // 带鼠标悬停效果的按钮子类
     private class HoverableButton: NSButton {
         weak var statusBarManager: StatusBarManager?
@@ -2371,15 +2430,6 @@ class StatusBarManager {
             
             // 存储点击位置到StatusBarManager
             statusBarManager?.lastClickLocation = globalLocation
-
-            
-            // 同时打印其他坐标信息用于调试
-            let windowLocation = event.locationInWindow
-
-            
-            // if let window = window {
-            //     let screenLocation = window.convertPoint(toScreen: windowLocation)
-            // }
 
             
             // 调用父类方法
@@ -2412,6 +2462,21 @@ class StatusBarManager {
         let iconImageView = NSImageView(frame: NSRect(x: 8, y: 4, width: 24, height: 24))
         if let deviceIcon = getDeviceIcon(for: device, size: NSSize(width: 24, height: 24), applyTemplate: true) {
             iconImageView.image = deviceIcon
+            
+            // 已连接设备，设置图标颜色为白色
+            if device.isConnected {
+                if #available(macOS 10.14, *) {
+                    iconImageView.contentTintColor = .white
+                } else {
+                    // 旧系统回退方案
+                    let whiteImage = NSImage(size: deviceIcon.size)
+                    whiteImage.lockFocus()
+                    NSColor.white.set()
+                    deviceIcon.draw(in: NSRect(origin: .zero, size: deviceIcon.size))
+                    whiteImage.unlockFocus()
+                    iconImageView.image = whiteImage
+                }
+            }
         }
         deviceView.addSubview(iconImageView)
         
@@ -2421,7 +2486,7 @@ class StatusBarManager {
         nameLabel.isBezeled = false
         nameLabel.isEditable = false
         nameLabel.backgroundColor = .clear
-        nameLabel.textColor = device.isConnected ? .labelColor : .secondaryLabelColor
+        nameLabel.textColor = device.isConnected ? .white : .secondaryLabelColor
         nameLabel.font = NSFont.systemFont(ofSize: 13)
         nameLabel.isSelectable = false
         deviceView.addSubview(nameLabel)
@@ -2445,7 +2510,7 @@ class StatusBarManager {
             batteryLabel.isBezeled = false
             batteryLabel.isEditable = false
             batteryLabel.backgroundColor = .clear
-            batteryLabel.textColor = device.isConnected ? .labelColor : .secondaryLabelColor
+            batteryLabel.textColor = device.isConnected ? .white : .secondaryLabelColor
             batteryLabel.font = NSFont.systemFont(ofSize: 13)
             batteryLabel.alignment = .right
             batteryLabel.isSelectable = false
@@ -2946,11 +3011,44 @@ class StatusBarManager {
                     
                     /////////////////////// 添加设备图标
                     let iconImageView = NSImageView(frame: NSRect(x: 12, y: 92, width: 34, height: 34)) // 调整位置和大小，放大1.2倍
-                    // 使用可复用的方法获取设备图标，使用模板模式让系统根据主题自动调整颜色
+                    // 使用可复用的方法获取设备图标
                     if let deviceIcon = self.getDeviceIcon(for: device, size: NSSize(width: 34, height: 34), applyTemplate: true) {
                         iconImageView.image = deviceIcon
+                        
+                        // 已连接设备，设置图标颜色为白色
+                        if device.isConnected {
+                            if #available(macOS 10.14, *) {
+                                iconImageView.contentTintColor = .white
+                            } else {
+                                // 旧系统回退方案
+                                let whiteImage = NSImage(size: deviceIcon.size)
+                                whiteImage.lockFocus()
+                                NSColor.white.set()
+                                deviceIcon.draw(in: NSRect(origin: .zero, size: deviceIcon.size))
+                                whiteImage.unlockFocus()
+                                iconImageView.image = whiteImage
+                            }
+                        }
                     }
                     visualEffectView.addSubview(iconImageView)
+                    
+                    /////////////////////// 添加电量圆形指示器
+                    if device.isConnected {
+                        // 计算电量值
+                        var batteryLevel: Int = 0
+                        if device.isAppleDevice {
+                            // 苹果设备使用左耳电量作为主要电量
+                            batteryLevel = device.leftBatteryLevel ?? 0 
+                        } else {
+                            // 非苹果设备使用通用电量
+                            batteryLevel = device.batteryLevel ?? 0
+                        }
+                        
+                        // 创建电量指示器视图
+                        let batteryIndicator = BatteryCircleView(frame: NSRect(x: 220 - 50, y: 90, width: 40, height: 40))
+                        batteryIndicator.batteryLevel = batteryLevel
+                        visualEffectView.addSubview(batteryIndicator)
+                    }
                     
                     ////////////////////// 添加设备名称
                     let nameLabel = NSTextField(frame: NSRect(x: 52, y: 99, width: 194, height: 18)) // 调整位置和大小，整体向上移动
@@ -3253,11 +3351,7 @@ class StatusBarManager {
             // 计算警告框的大小
             let alertSize = alertWindow.frame.size
             
-            // 打印屏幕信息
-            if let screen = NSScreen.main {
-                // print("屏幕大小: \(screen.frame.size)")
-                // print("屏幕可视区域: \(screen.visibleFrame)")
-            }
+
             
             // 计算警告框的位置：点击位置的正下方
             // 注意：在macOS中，NSEvent.mouseLocation的原点在屏幕左下角
@@ -3270,9 +3364,7 @@ class StatusBarManager {
             )
             
             // 获取屏幕的可视区域
-            if let screen = NSScreen.main {
-                let screenFrame = screen.visibleFrame
-                
+            if let screenFrame = NSScreen.main?.visibleFrame {
                 // 确保警告框不会超出屏幕边界
                 // 水平方向调整
                 if alertFrame.origin.x < screenFrame.origin.x {
@@ -3291,7 +3383,7 @@ class StatusBarManager {
             
             // 设置警告框的位置
             alertWindow.setFrame(alertFrame, display: true)
-            print("警告框位置: \(alertFrame)")
+            // print("警告框位置: \(alertFrame)")
             
             // 强制设置窗口级别，确保它显示在菜单上方
             alertWindow.level = .floating
@@ -3306,7 +3398,7 @@ class StatusBarManager {
             }
         } else {
             // 如果没有获取到点击位置，使用默认方式显示
-            print("没有获取到点击位置，使用默认方式显示")
+            // print("没有获取到点击位置，使用默认方式显示")
             // 尝试使用主窗口作为父窗口显示警告框
             if let window = NSApp.mainWindow ?? NSApp.windows.first {
                 // 使用sheet方式显示，确保置顶
