@@ -684,6 +684,10 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
         print("Timestamp: \(timestamp)")
         print("Current devices count: \(devices.count)")
         
+        // 预先获取system_profiler数据并缓存，避免多个设备重复调用
+        print("Preloading system_profiler data...")
+        getCachedSystemProfilerData()
+        
         // 方法1: 使用IOBluetooth框架获取已配对的设备
         print("Calling IOBluetoothDevice.pairedDevices()...")
         if let devicesArray = IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice] {
@@ -1098,108 +1102,82 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
     private func getAirPodsBatteryLevel(deviceName: String, deviceAddress: String) -> (caseLevel: Int?, leftLevel: Int?, rightLevel: Int?, generalLevel: Int?) {
         print("[\(localTimeString())] 尝试获取AirPods电量: \(deviceName), 地址: \(deviceAddress)")
         
-        // 使用system_profiler命令获取蓝牙设备信息，使用JSON格式输出
-        let command = "system_profiler SPBluetoothDataType -json"
-        print("[\(localTimeString())] 执行命令: \(command)")
-        
-        let task = Process()
-        task.launchPath = "/bin/bash"
-        task.arguments = ["-c", command]
-        
-        let pipe = Pipe()
-        task.standardOutput = pipe
+        // 使用缓存的system_profiler数据
+        guard let json = getCachedSystemProfilerData(),
+              let bluetoothData = json["SPBluetoothDataType"] as? [[String: Any]] else {
+            print("[\(localTimeString())] 无法获取system_profiler数据")
+            return (nil, nil, nil, nil)
+        }
         
         var caseLevel: Int? = nil
         var leftLevel: Int? = nil
         var rightLevel: Int? = nil
         var generalLevel: Int? = nil
         
-        do {
-            try task.run()
-            task.waitUntilExit()
-            
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            if let output = String(data: data, encoding: .utf8) {
-                print("[\(localTimeString())] 命令输出长度: \(output.count) 字符")
-                
-                // 解析JSON输出
-                if let data = output.data(using: .utf8) {
-                    do {
-                        if let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] {
-                            if let bluetoothData = json["SPBluetoothDataType"] as? [[String: Any]] {
-                                for bluetoothItem in bluetoothData {
-                                    if let connectedDevices = bluetoothItem["device_connected"] as? [[String: Any]] {
-                                        for deviceItem in connectedDevices {
-                                            for (deviceKey, deviceInfo) in deviceItem {
-                                                if let deviceDetails = deviceInfo as? [String: Any] {
-                                                    // 获取设备地址并与目标设备地址比对
-                                                    if let deviceAddressValue = deviceDetails["device_address"] as? String {
-                                                        // 格式化地址以确保匹配（移除冒号和连字符并转为大写）
-                                                        let formattedTargetAddress = deviceAddress.replacingOccurrences(of: ":", with: "").replacingOccurrences(of: "-", with: "").uppercased()
-                                                        let formattedDeviceAddress = deviceAddressValue.replacingOccurrences(of: ":", with: "").replacingOccurrences(of: "-", with: "").uppercased()
-                                                        
-                                                        if formattedTargetAddress == formattedDeviceAddress {
-                                                            print("[\(localTimeString())] 找到匹配的设备: \(deviceKey)")
-                                                            
-                                                            // 提取电量信息
-                                                            if let caseBattery = deviceDetails["device_batteryLevelCase"] as? String {
-                                                                if let level = Int(caseBattery.replacingOccurrences(of: "%", with: "")) {
-                                                                    caseLevel = level
-                                                                    print("[\(localTimeString())] 成功获取充电盒电量: \(level)%")
-                                                                }
-                                                            }
-                                                            
-                                                            if let leftBattery = deviceDetails["device_batteryLevelLeft"] as? String {
-                                                                if let level = Int(leftBattery.replacingOccurrences(of: "%", with: "")) {
-                                                                    leftLevel = level
-                                                                    print("[\(localTimeString())] 成功获取左耳电量: \(level)%")
-                                                                }
-                                                            }
-                                                            
-                                                            if let rightBattery = deviceDetails["device_batteryLevelRight"] as? String {
-                                                                if let level = Int(rightBattery.replacingOccurrences(of: "%", with: "")) {
-                                                                    rightLevel = level
-                                                                    print("[\(localTimeString())] 成功获取右耳电量: \(level)%")
-                                                                }
-                                                            }
-                                                            
-                                                            // 尝试获取通用电量
-                                                            if let batteryLevel = deviceDetails["device_batteryLevel"] as? String {
-                                                                if let level = Int(batteryLevel.replacingOccurrences(of: "%", with: "")) {
-                                                                    generalLevel = level
-                                                                    print("[\(localTimeString())] 成功获取通用设备电量: \(level)%")
-                                                                }
-                                                            }
-                                                            
-                                                            // 尝试获取非苹果设备的主电量
-                                                            if let mainBattery = deviceDetails["device_batteryLevelMain"] as? String {
-                                                                if let level = Int(mainBattery.replacingOccurrences(of: "%", with: "")) {
-                                                                    generalLevel = level
-                                                                    print("[\(localTimeString())] 成功获取非苹果设备主电量: \(level)%")
-                                                                }
-                                                            }
-                                                            
-                                                            // 找到匹配设备后退出循环
-                                                            return (caseLevel, leftLevel, rightLevel, generalLevel)
-                                                        }
-                                                    }
-                                                }
-                                            }
+        for bluetoothItem in bluetoothData {
+            if let connectedDevices = bluetoothItem["device_connected"] as? [[String: Any]] {
+                for deviceItem in connectedDevices {
+                    for (deviceKey, deviceInfo) in deviceItem {
+                        if let deviceDetails = deviceInfo as? [String: Any] {
+                            // 获取设备地址并与目标设备地址比对
+                            if let deviceAddressValue = deviceDetails["device_address"] as? String {
+                                // 格式化地址以确保匹配（移除冒号和连字符并转为大写）
+                                let formattedTargetAddress = deviceAddress.replacingOccurrences(of: ":", with: "").replacingOccurrences(of: "-", with: "").uppercased()
+                                let formattedDeviceAddress = deviceAddressValue.replacingOccurrences(of: ":", with: "").replacingOccurrences(of: "-", with: "").uppercased()
+                                
+                                if formattedTargetAddress == formattedDeviceAddress {
+                                    print("[\(localTimeString())] 找到匹配的设备: \(deviceKey)")
+                                    
+                                    // 提取电量信息
+                                    if let caseBattery = deviceDetails["device_batteryLevelCase"] as? String {
+                                        if let level = Int(caseBattery.replacingOccurrences(of: "%", with: "")) {
+                                            caseLevel = level
+                                            print("[\(localTimeString())] 成功获取充电盒电量: \(level)%")
                                         }
                                     }
+                                    
+                                    if let leftBattery = deviceDetails["device_batteryLevelLeft"] as? String {
+                                        if let level = Int(leftBattery.replacingOccurrences(of: "%", with: "")) {
+                                            leftLevel = level
+                                            print("[\(localTimeString())] 成功获取左耳电量: \(level)%")
+                                        }
+                                    }
+                                    
+                                    if let rightBattery = deviceDetails["device_batteryLevelRight"] as? String {
+                                        if let level = Int(rightBattery.replacingOccurrences(of: "%", with: "")) {
+                                            rightLevel = level
+                                            print("[\(localTimeString())] 成功获取右耳电量: \(level)%")
+                                        }
+                                    }
+                                    
+                                    // 尝试获取通用电量
+                                    if let batteryLevel = deviceDetails["device_batteryLevel"] as? String {
+                                        if let level = Int(batteryLevel.replacingOccurrences(of: "%", with: "")) {
+                                            generalLevel = level
+                                            print("[\(localTimeString())] 成功获取通用设备电量: \(level)%")
+                                        }
+                                    }
+                                    
+                                    // 尝试获取非苹果设备的主电量
+                                    if let mainBattery = deviceDetails["device_batteryLevelMain"] as? String {
+                                        if let level = Int(mainBattery.replacingOccurrences(of: "%", with: "")) {
+                                            generalLevel = level
+                                            print("[\(localTimeString())] 成功获取非苹果设备主电量: \(level)%")
+                                        }
+                                    }
+                                    
+                                    // 找到匹配设备后退出循环
+                                    return (caseLevel, leftLevel, rightLevel, generalLevel)
                                 }
                             }
                         }
-                    } catch {
-                        print("[\(localTimeString())] JSON解析失败: \(error)")
                     }
                 }
             }
-        } catch {
-            print("[\(localTimeString())] 执行命令失败: \(error)")
         }
         
-        return (caseLevel, leftLevel, rightLevel, generalLevel)
+        print("[\(localTimeString())] 未找到匹配的设备电量信息")
+        return (nil, nil, nil, nil)
     }
     
     // 通过IOKit获取HID设备电量
@@ -1836,6 +1814,8 @@ class StatusBarManager {
                     // 为设备图标设置不同的action，点击时显示设备详情信息
                     button.action = #selector(self.showDeviceDetails)
                     button.target = self
+                    // 允许按钮响应右键点击事件
+                    button.sendAction(on: [.leftMouseDown, .rightMouseDown])
                     // 为设备图标设置toolTip，鼠标移动时显示设备名称
                     button.toolTip = device.name
                     // 确保按钮可见
@@ -2034,6 +2014,10 @@ class StatusBarManager {
         // 首先同步获取最新的设备状态，然后再创建菜单
         print("[\(localTimeString())] showDeviceMenu - Started, refreshing device status...")
         
+        // 预先获取system_profiler数据并缓存，避免多个设备重复调用
+        print("Preloading system_profiler data for menu...")
+        getCachedSystemProfilerData()
+        
         // 直接使用IOBluetoothDevice的isConnected()方法来检查设备的实时连接状态
         // 这样可以确保获取到最新的设备连接状态，而不依赖于bluetoothManager.devices中的缓存状态
         if let devicesArray = IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice] {
@@ -2072,6 +2056,13 @@ class StatusBarManager {
                 // 检查设备是否已连接（使用实时状态）
                 let isConnected = bluetoothDevice.isConnected()
                 
+                // 优先使用从system_profiler获取的设备名称
+                var finalDeviceName = deviceName
+                let deviceAddress = addressString.isEmpty ? deviceID : addressString
+                if let systemName = getSystemDeviceName(for: deviceAddress) {
+                    finalDeviceName = systemName
+                }
+                
                 // 创建蓝牙设备对象
                 var batteryLevel: Int?
                 var caseBatteryLevel: Int?
@@ -2079,17 +2070,17 @@ class StatusBarManager {
                 var rightBatteryLevel: Int?
                 
                 if isConnected {
-                    // 创建临时设备对象以获取真实电量
+                    // 创建临时设备对象以获取真实电量，使用从system_profiler获取的名称
                     let tempDevice = BluetoothDevice(
                         id: deviceID,
-                        name: deviceName,
-                        macAddress: addressString.isEmpty ? deviceID : addressString,
+                        name: finalDeviceName,
+                        macAddress: deviceAddress,
                         isConnected: isConnected,
                         batteryLevel: nil,
                         caseBatteryLevel: nil,
                         leftBatteryLevel: nil,
                         rightBatteryLevel: nil,
-                        defaultIconName: getDeviceIconName(for: deviceName),
+                        defaultIconName: getDeviceIconName(for: finalDeviceName),
                         customIconName: customIconName
                     )
                     
@@ -2099,14 +2090,6 @@ class StatusBarManager {
                     leftBatteryLevel = batteryLevels.leftLevel
                     rightBatteryLevel = batteryLevels.rightLevel
                     batteryLevel = batteryLevels.generalLevel ?? batteryLevels.leftLevel
-                }
-                
-                // 优先使用从system_profiler获取的设备名称
-                var finalDeviceName = deviceName
-                let deviceAddress = addressString.isEmpty ? deviceID : addressString
-                if let systemName = getSystemDeviceName(for: deviceAddress) {
-                    finalDeviceName = systemName
-                    print("Using system profiler device name: \(systemName) for address: \(deviceAddress)")
                 }
                 
                 let device = BluetoothDevice(
@@ -2420,7 +2403,7 @@ class StatusBarManager {
         deviceItem.representedObject = device // 设置 representedObject 以便后续检测状态变化
         
         // 创建设备信息视图
-        let deviceView = HoverableView(frame: NSRect(x: 0, y: 0, width: 200, height: 32))
+        let deviceView = HoverableView(frame: NSRect(x: 0, y: 0, width: 220, height: 32))
         deviceView.wantsLayer = true
         deviceView.layer?.backgroundColor = NSColor.clear.cgColor
         
@@ -2447,7 +2430,7 @@ class StatusBarManager {
         deviceView.addSubview(iconImageView)
         
         // 添加设备名称
-        let nameLabel = NSTextField(frame: NSRect(x: 40, y: 0, width: 100, height: 24))
+        let nameLabel = NSTextField(frame: NSRect(x: 40, y: 0, width: 120, height: 24))
         nameLabel.stringValue = device.name
         nameLabel.isBezeled = false
         nameLabel.isEditable = false
@@ -2455,10 +2438,11 @@ class StatusBarManager {
         nameLabel.textColor = device.isConnected ? .white : .secondaryLabelColor
         nameLabel.font = NSFont.systemFont(ofSize: 13)
         nameLabel.isSelectable = false
+        nameLabel.lineBreakMode = .byTruncatingTail // 当名称超长时显示省略号
         deviceView.addSubview(nameLabel)
         
         // 添加连接状态指示器
-        let statusLabel = NSTextField(frame: NSRect(x: 130, y: 0, width: 20, height: 24))
+        let statusLabel = NSTextField(frame: NSRect(x: 150, y: 0, width: 20, height: 24))
         statusLabel.stringValue = device.isConnected ? "●" : ""
         statusLabel.isBezeled = false
         statusLabel.isEditable = false
@@ -2471,7 +2455,7 @@ class StatusBarManager {
         
         // 添加电量信息（如果有）
         if let batteryLevel = device.batteryLevel {
-            let batteryLabel = NSTextField(frame: NSRect(x: 150, y: 0, width: 40, height: 24))
+            let batteryLabel = NSTextField(frame: NSRect(x: 170, y: 0, width: 40, height: 24))
             batteryLabel.stringValue = "\(batteryLevel)%"
             batteryLabel.isBezeled = false
             batteryLabel.isEditable = false
@@ -2927,11 +2911,24 @@ class StatusBarManager {
 
     
     @objc private func showDeviceDetails(_ sender: AnyObject) {
+        // 确保system_profiler数据已缓存，避免点击时重复调用
+        getCachedSystemProfilerData()
+        
         // 找出是哪个设备的图标被点击了
         for (_, deviceInfo) in deviceStatusItems {
             if let button = deviceInfo.statusItem.button, button === sender {
                 let device = deviceInfo.device
-                showDeviceDetailsForDevice(device)
+                
+                // 检查是否是右键点击
+                let event = NSApp.currentEvent
+                if event?.type == .rightMouseDown || (event?.type == .leftMouseDown && event?.modifierFlags.contains(.control) == true) {
+                    // 右键点击，显示设备的二级菜单
+                    let menu = createDeviceSubmenu(device: device)
+                    NSMenu.popUpContextMenu(menu, with: event!, for: button)
+                } else {
+                    // 左键点击，显示设备详情
+                    showDeviceDetailsForDevice(device)
+                }
                 break
             }
         }
@@ -3961,8 +3958,22 @@ struct IconDisplaySettingsView: View {
     }
 }
 
-// 从system_profiler获取蓝牙设备信息
-func getBluetoothDevicesFromSystemProfiler() -> [String: String] {
+// 缓存机制
+var systemProfilerCache: (data: [String: Any], timestamp: Date)?
+let cacheExpirationInterval: TimeInterval = 5 // 缓存过期时间（秒）
+
+// 获取缓存的system_profiler数据
+func getCachedSystemProfilerData() -> [String: Any]? {
+    // 检查缓存是否存在且未过期
+    if let (cachedData, timestamp) = systemProfilerCache {
+        if Date().timeIntervalSince(timestamp) < cacheExpirationInterval {
+            print("[\(localTimeString())] 使用缓存的system_profiler数据")
+            return cachedData
+        }
+    }
+    
+    // 缓存不存在或已过期，重新获取
+    print("[\(localTimeString())] 重新获取system_profiler数据")
     let task = Process()
     task.launchPath = "/usr/sbin/system_profiler"
     task.arguments = ["SPBluetoothDataType", "-json"]
@@ -3976,44 +3987,12 @@ func getBluetoothDevicesFromSystemProfiler() -> [String: String] {
         
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         if let jsonString = String(data: data, encoding: .utf8) {
-            // 解析JSON获取设备信息
             if let data = jsonString.data(using: .utf8) {
                 do {
-                    if let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
-                       let bluetoothData = json["SPBluetoothDataType"] as? [[String: Any]] {
-                        var deviceMap: [String: String] = [:]
-                        
-                        for item in bluetoothData {
-                            // 处理已连接设备
-                            if let connectedDevices = item["device_connected"] as? [[String: Any]] {
-                                for deviceDict in connectedDevices {
-                                    for (name, deviceInfo) in deviceDict {
-                                        if let info = deviceInfo as? [String: Any],
-                                           let address = info["device_address"] as? String {
-                                            // 将地址格式化为统一格式（移除冒号并转换为大写）
-                                            let formattedAddress = address.replacingOccurrences(of: ":", with: "").uppercased()
-                                            deviceMap[formattedAddress] = name
-                                        }
-                                    }
-                                }
-                            }
-                            
-                            // 处理未连接设备
-                            if let disconnectedDevices = item["device_not_connected"] as? [[String: Any]] {
-                                for deviceDict in disconnectedDevices {
-                                    for (name, deviceInfo) in deviceDict {
-                                        if let info = deviceInfo as? [String: Any],
-                                           let address = info["device_address"] as? String {
-                                            // 将地址格式化为统一格式（移除冒号并转换为大写）
-                                            let formattedAddress = address.replacingOccurrences(of: ":", with: "").uppercased()
-                                            deviceMap[formattedAddress] = name
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        
-                        return deviceMap
+                    if let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] {
+                        // 更新缓存
+                        systemProfilerCache = (json, Date())
+                        return json
                     }
                 } catch {
                     print("Error parsing system_profiler JSON: \(error)")
@@ -4024,7 +4003,49 @@ func getBluetoothDevicesFromSystemProfiler() -> [String: String] {
         print("Error running system_profiler: \(error)")
     }
     
-    return [:]
+    return nil
+}
+
+// 从system_profiler获取蓝牙设备信息
+func getBluetoothDevicesFromSystemProfiler() -> [String: String] {
+    guard let json = getCachedSystemProfilerData(),
+          let bluetoothData = json["SPBluetoothDataType"] as? [[String: Any]] else {
+        return [:]
+    }
+    
+    var deviceMap: [String: String] = [:]
+    
+    for item in bluetoothData {
+        // 处理已连接设备
+        if let connectedDevices = item["device_connected"] as? [[String: Any]] {
+            for deviceDict in connectedDevices {
+                for (name, deviceInfo) in deviceDict {
+                    if let info = deviceInfo as? [String: Any],
+                       let address = info["device_address"] as? String {
+                        // 将地址格式化为统一格式（移除冒号并转换为大写）
+                        let formattedAddress = address.replacingOccurrences(of: ":", with: "").uppercased()
+                        deviceMap[formattedAddress] = name
+                    }
+                }
+            }
+        }
+        
+        // 处理未连接设备
+        if let disconnectedDevices = item["device_not_connected"] as? [[String: Any]] {
+            for deviceDict in disconnectedDevices {
+                for (name, deviceInfo) in deviceDict {
+                    if let info = deviceInfo as? [String: Any],
+                       let address = info["device_address"] as? String {
+                        // 将地址格式化为统一格式（移除冒号并转换为大写）
+                        let formattedAddress = address.replacingOccurrences(of: ":", with: "").uppercased()
+                        deviceMap[formattedAddress] = name
+                    }
+                }
+            }
+        }
+    }
+    
+    return deviceMap
 }
 
 // 获取设备的系统名称（从system_profiler获取）
