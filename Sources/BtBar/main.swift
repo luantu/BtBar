@@ -254,9 +254,9 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
             queue: nil
         ) { [weak self] notification in
             let timestamp = localTimeString()
-            print("[\(timestamp)] 收到蓝牙相关通知: IOBluetoothDevicePublished")
-            print("[\(timestamp)] 通知对象: \(notification.object ?? "nil")")
-            print("[\(timestamp)] 通知对象类型: \(type(of: notification.object))")
+            print("[\(timestamp)] **** 收到蓝牙相关通知: IOBluetoothDevicePublished")
+            print("[\(timestamp)] **** 通知对象: \(notification.object ?? "nil")")
+            print("[\(timestamp)] **** 通知对象类型: \(type(of: notification.object))")
             self?.retrieveConnectedDevices()
         }
         
@@ -267,35 +267,35 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
             queue: nil
         ) { [weak self] notification in
             let timestamp = localTimeString()
-            print("[\(timestamp)] 收到蓝牙相关通知: IOBluetoothDeviceDestroyed")
-            print("[\(timestamp)] 通知对象: \(notification.object ?? "nil")")
-            print("[\(timestamp)] 通知对象类型: \(type(of: notification.object))")
+            print("[\(timestamp)] **** 收到蓝牙相关通知: IOBluetoothDeviceDestroyed")
+            print("[\(timestamp)] **** 通知对象: \(notification.object ?? "nil")")
+            print("[\(timestamp)] **** 通知对象类型: \(type(of: notification.object))")
             self?.retrieveConnectedDevices()
         }
         
         // 监听蓝牙设备断开通知（设备断开时触发）
-        NotificationCenter.default.addObserver(
-            forName: Notification.Name("IOBluetoothDeviceDisconnected"),
-            object: nil,
-            queue: nil
-        ) { [weak self] notification in
-            let timestamp = localTimeString()
-            print("[\(timestamp)] 收到蓝牙相关通知: IOBluetoothDeviceDisconnected")
-            print("[\(timestamp)] 通知对象: \(notification.object ?? "nil")")
-            print("[\(timestamp)] 通知对象类型: \(type(of: notification.object))")
-            self?.retrieveConnectedDevices()
-        }
+        // NotificationCenter.default.addObserver(
+        //     forName: Notification.Name("IOBluetoothDeviceDisconnected"),
+        //     object: nil,
+        //     queue: nil
+        // ) { [weak self] notification in
+        //     let timestamp = localTimeString()
+        //     print("[\(timestamp)] **** 收到蓝牙相关通知: IOBluetoothDeviceDisconnected")
+        //     print("[\(timestamp)] **** 通知对象: \(notification.object ?? "nil")")
+        //     print("[\(timestamp)] **** 通知对象类型: \(type(of: notification.object))")
+        //     self?.retrieveConnectedDevices()
+        // }
         
         // 监听蓝牙状态变化通知
-        NotificationCenter.default.addObserver(
-            forName: NSNotification.Name("CBCentralManagerStateChangedNotification"),
-            object: nil,
-            queue: nil
-        ) { [weak self] notification in
-            let timestamp = localTimeString()
-            print("[\(timestamp)] 收到蓝牙状态变化通知，对象类型: \(type(of: notification.object))")
-            self?.retrieveConnectedDevices()
-        }
+        // NotificationCenter.default.addObserver(
+        //     forName: NSNotification.Name("CBCentralManagerStateChangedNotification"),
+        //     object: nil,
+        //     queue: nil
+        // ) { [weak self] notification in
+        //     let timestamp = localTimeString()
+        //     print("[\(timestamp)] **** 收到蓝牙状态变化通知，对象类型: \(type(of: notification.object))")
+        //     self?.retrieveConnectedDevices()
+        // }
         
         // 监听所有蓝牙相关通知，用于调试
         // NotificationCenter.default.addObserver(
@@ -360,6 +360,31 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
         let startTime = Date()
         let timestamp = localTimeString()
         print("[\(timestamp)] 开始处理蓝牙设备更新")
+        
+        // 检查缓存是否存在，如果不存在，同步等待缓存刷新
+        if getCachedSystemProfilerData() == nil {
+            print("[\(timestamp)] 缓存不存在，同步刷新缓存")
+            // 使用DispatchGroup等待缓存刷新完成
+            let group = DispatchGroup()
+            group.enter()
+            
+            // 立即刷新缓存
+            CacheManager.shared.refreshSystemProfilerCache()
+            
+            // 延迟检查缓存是否刷新完成
+            DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 0.1) { 
+                // 最多等待5秒，直到缓存刷新完成
+                let startWaitTime = Date()
+                while getCachedSystemProfilerData() == nil && Date().timeIntervalSince(startWaitTime) < 5 {
+                    usleep(100000) // 等待100ms
+                }
+                group.leave()
+            }
+            
+            // 等待缓存刷新完成
+            _ = group.wait(timeout: .now() + 5)
+            print("[\(timestamp)] **** 同步等待缓存刷新完成或超时")
+        }
         
         // 方法1: 使用IOBluetooth框架获取已配对的设备
         if let devicesArray = IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice] {
@@ -447,6 +472,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
                         customIconName: customIconName
                     )
                     
+                    // 直接获取电量，因为缓存已经确保存在
                     let batteryLevels = fetchRealBatteryLevel(for: tempDevice)
                     if batteryLevels.caseLevel != nil || batteryLevels.leftLevel != nil || batteryLevels.rightLevel != nil || batteryLevels.generalLevel != nil {
                         // 对于苹果设备，使用通用电量或左耳电量作为显示电量
@@ -1470,8 +1496,48 @@ class StatusBarManager {
                 if justConnected {
                     // 延迟一点时间，确保图标已经完全创建
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        // 模拟点击状态栏图标，触发气泡显示，并设置5秒后自动关闭
-                        self.showDeviceDetailsForDevice(device, autoClose: true)
+                        // 检查是否有电量信息，如果没有，等待一段时间后再显示
+                        if device.batteryLevel != nil || device.leftBatteryLevel != nil || device.rightBatteryLevel != nil {
+                            // 已有电量信息，直接显示
+                            self.showDeviceDetailsForDevice(device, autoClose: true)
+                        } else {
+                            // 没有电量信息，等待缓存刷新后再显示
+                            print("[\(localTimeString())] 设备刚连接，等待电量信息...")
+                            // 最多等待3秒，直到获取到电量信息
+                            let startWaitTime = Date()
+                            var hasBatteryInfo = false
+                            var cacheRefreshed = false
+                            
+                            // 在后台线程中等待电量信息
+                            DispatchQueue.global(qos: .background).async {
+                                while !hasBatteryInfo && Date().timeIntervalSince(startWaitTime) < 3 {
+                                    // 再次获取设备信息
+                                    let updatedDevices = self.bluetoothManager.devices
+                                    if let updatedDevice = updatedDevices.first(where: { $0.id == device.id }) {
+                                        if updatedDevice.batteryLevel != nil || updatedDevice.leftBatteryLevel != nil || updatedDevice.rightBatteryLevel != nil {
+                                            hasBatteryInfo = true
+                                            // 在主线程中显示弹窗
+                                            DispatchQueue.main.async {
+                                                self.showDeviceDetailsForDevice(updatedDevice, autoClose: true)
+                                            }
+                                        } else if !cacheRefreshed {
+                                            // 没有电量信息，且缓存还没有刷新，触发缓存刷新
+                                            print("[\(localTimeString())] 未获取到电量信息，触发缓存刷新...")
+                                            CacheManager.shared.refreshSystemProfilerCache()
+                                            cacheRefreshed = true
+                                        }
+                                    }
+                                    usleep(100000) // 等待100ms
+                                }
+                                
+                                // 如果超时仍未获取到电量信息，也显示弹窗
+                                if !hasBatteryInfo {
+                                    DispatchQueue.main.async {
+                                        self.showDeviceDetailsForDevice(device, autoClose: true)
+                                    }
+                                }
+                            }
+                        }
                     }
                     
                     // 调用统一的音频设备切换方法，不显示操作结果
@@ -3628,7 +3694,7 @@ struct IconDisplaySettingsView: View {
 
 // 缓存机制
 var systemProfilerCache: (data: [String: Any], timestamp: Date)?
-let cacheExpirationInterval: TimeInterval = 60 // 缓存过期时间（秒）
+let cacheExpirationInterval: TimeInterval = 15 // 缓存过期时间（秒）
 
 // 缓存管理器类
 class CacheManager {
