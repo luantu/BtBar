@@ -2053,23 +2053,102 @@ class StatusBarManager {
         // 设置二级菜单外观为暗色，确保与主菜单背景一致
         submenu.appearance = NSAppearance(named: .darkAqua)
         
+        // 添加设备信息视图（与弹出气泡详情一致）
+        let deviceInfoItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        deviceInfoItem.isEnabled = false
+        
+        // 创建设备信息视图
+        let deviceInfoView = NSView(frame: NSRect(x: 0, y: 0, width: 220, height: 50))
+        deviceInfoView.wantsLayer = true
+        deviceInfoView.layer?.backgroundColor = NSColor.clear.cgColor
+        
+        // 添加设备图标
+        let iconImageView = NSImageView(frame: NSRect(x: 12, y: 8, width: 34, height: 34))
+        if let deviceIcon = getDeviceIcon(for: device, size: NSSize(width: 34, height: 34), applyTemplate: true) {
+            iconImageView.image = deviceIcon
+            if device.isConnected {
+                if #available(macOS 10.14, *) {
+                    iconImageView.contentTintColor = .white
+                } else {
+                    // 旧系统回退方案
+                    let whiteImage = NSImage(size: deviceIcon.size)
+                    whiteImage.lockFocus()
+                    NSColor.white.set()
+                    deviceIcon.draw(in: NSRect(origin: .zero, size: deviceIcon.size))
+                    whiteImage.unlockFocus()
+                    iconImageView.image = whiteImage
+                }
+            }
+        }
+        deviceInfoView.addSubview(iconImageView)
+        
+        // 添加设备名称
+        let nameLabel = NSTextField(frame: NSRect(x: 54, y: 18, width: 110, height: 16))
+        nameLabel.stringValue = device.name
+        nameLabel.isBezeled = false
+        nameLabel.isEditable = false
+        nameLabel.backgroundColor = .clear
+        nameLabel.textColor = device.isConnected ? .white : .secondaryLabelColor
+        nameLabel.font = NSFont.boldSystemFont(ofSize: 13)
+        nameLabel.isSelectable = false
+        nameLabel.lineBreakMode = .byTruncatingTail
+        deviceInfoView.addSubview(nameLabel)
+        
+        // 添加电量圆形指示器
+        if device.isConnected {
+            // 计算电量值
+            var batteryLevel: Int = 0
+            if device.isAppleDevice {
+                // 苹果设备的电量计算逻辑
+                if let leftLevel = device.leftBatteryLevel, let rightLevel = device.rightBatteryLevel {
+                    // 左右耳都有，使用平均值
+                    batteryLevel = (leftLevel + rightLevel) / 2
+                } else if let leftLevel = device.leftBatteryLevel {
+                    // 只有左耳，使用左耳电量
+                    batteryLevel = leftLevel
+                } else if let rightLevel = device.rightBatteryLevel {
+                    // 只有右耳，使用右耳电量
+                    batteryLevel = rightLevel
+                } else {
+                    // 没有电量信息
+                    batteryLevel = 0
+                }
+            } else {
+                // 非苹果设备使用通用电量
+                batteryLevel = device.batteryLevel ?? 0
+            }
+            
+            // 创建电量指示器视图
+            let batteryIndicator = BatteryCircleView(frame: NSRect(x: 170, y: 5, width: 40, height: 40))
+            batteryIndicator.batteryLevel = batteryLevel
+            deviceInfoView.addSubview(batteryIndicator)
+        }
+        
+        deviceInfoItem.view = deviceInfoView
+        submenu.addItem(deviceInfoItem)
+        
+        // 添加分隔线
+        submenu.addItem(NSMenuItem.separator())
+        
         // 连接/断开操作
         let connectAction = device.isConnected ? "Disconnect" : "Connect"
         let connectItem = NSMenuItem(title: connectAction, action: #selector(toggleDeviceConnection(_:)), keyEquivalent: "")
         connectItem.target = self
         connectItem.representedObject = device
+        if let image = NSImage(systemSymbolName: device.isConnected ? "microphone.slash" : "microphone", accessibilityDescription: connectAction) {
+            connectItem.image = image
+        }
         submenu.addItem(connectItem)
         
-        // 重命名操作
-        let renameItem = NSMenuItem(title: "Rename", action: #selector(renameDevice(_:)), keyEquivalent: "")
-        renameItem.target = self
-        renameItem.representedObject = device
-        submenu.addItem(renameItem)
+
         
         // 修改图标操作
         let changeIconItem = NSMenuItem(title: "Change Icon", action: #selector(changeDeviceIcon(_:)), keyEquivalent: "")
         changeIconItem.target = self
         changeIconItem.representedObject = device
+        if let image = NSImage(systemSymbolName: "paintbrush", accessibilityDescription: "Change Icon") {
+            changeIconItem.image = image
+        }
         submenu.addItem(changeIconItem)
         
         // 状态栏图标显示选项
@@ -2081,21 +2160,20 @@ class StatusBarManager {
         let showStatusIconItem = NSMenuItem(title: showStatusIconAction, action: #selector(toggleDeviceStatusIcon(_:)), keyEquivalent: "")
         showStatusIconItem.target = self
         showStatusIconItem.representedObject = device
+        if let image = NSImage(systemSymbolName: shouldShowIcon ? "eye.slash" : "eye", accessibilityDescription: showStatusIconAction) {
+            showStatusIconItem.image = image
+        }
         submenu.addItem(showStatusIconItem)
         
         // 设置为默认音频设备
         if device.isConnected {
-            let audioDeviceItem = NSMenuItem(title: "Set as Default Audio Device", action: #selector(setDefaultAudioDeviceForMenuItem(_:)), keyEquivalent: "")
+            let audioDeviceItem = NSMenuItem(title: "Set as Audio Device", action: #selector(setDefaultAudioDeviceForMenuItem(_:)), keyEquivalent: "")
             audioDeviceItem.target = self
             audioDeviceItem.representedObject = device
+            if let image = NSImage(systemSymbolName: "music.microphone.circle", accessibilityDescription: "Set as Default Audio Device") {
+                audioDeviceItem.image = image
+            }
             submenu.addItem(audioDeviceItem)
-        }
-        
-        // 电量信息
-        if let batteryLevel = device.batteryLevel {
-            let batteryItem = NSMenuItem(title: "Battery: \(batteryLevel)%", action: nil, keyEquivalent: "")
-            batteryItem.isEnabled = false
-            submenu.addItem(batteryItem)
         }
         
         return submenu
@@ -2127,94 +2205,89 @@ class StatusBarManager {
             alert.addButton(withTitle: "Cancel")
             
             // 显示对话框并确保文本框获取焦点
-            if let window = NSApp.mainWindow ?? NSApp.windows.first {
-                // 使用窗口作为父窗口，确保对话框置顶显示
-                alert.beginSheetModal(for: window) { [weak self, iconNameField, device] response in
-                    guard let self = self else { return }
-                    
-                    if response == .alertFirstButtonReturn { // OK button
-                        let iconName = iconNameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                        
-                        if !iconName.isEmpty {
-                            // 尝试使用输入的符号名称创建图标，验证是否有效
-                            if NSImage(systemSymbolName: iconName, accessibilityDescription: device.name) != nil {
-                                // 更新设备的自定义图标名称
-                                self.bluetoothManager.updateDeviceCustomIcon(device, iconName: iconName)
-                                
-                                // 确保设备图标显示设置为true
-                                self.showDeviceIcons[device.id] = true
-                                self.saveDeviceDisplaySettings()
-                                
-                                // 更新状态栏图标
-                                self.updateStatusItems(devices: self.bluetoothManager.devices)
-                                
-                                // 显示成功消息
-                                self.showSuccessAlert(title: "Success", message: "Icon updated successfully for \(device.name)")
-                            } else {
-                                // 显示错误消息，符号名称无效
-                                self.showErrorAlert(title: "Error", message: "Invalid system symbol name. Please try another name.")
-                            }
-                        } else {
-                            // 清空图标，使用默认图标
-                            self.bluetoothManager.updateDeviceCustomIcon(device, iconName: nil)
-                            
-                            // 确保设备图标显示设置为true
-                            self.showDeviceIcons[device.id] = true
-                            self.saveDeviceDisplaySettings()
-                            
-                            // 更新状态栏图标
-                            self.updateStatusItems(devices: self.bluetoothManager.devices)
-                            
-                            // 显示成功消息
-                            self.showSuccessAlert(title: "Success", message: "Icon reset to default for \(device.name)")
-                        }
-                    }
+            // 获取当前鼠标位置
+            let mouseLocation = NSEvent.mouseLocation
+            
+            // 获取警告框窗口
+            let alertWindow = alert.window
+            
+            // 计算警告框的大小
+            let alertSize = alertWindow.frame.size
+            
+            // 计算警告框的位置：鼠标位置的正下方
+            let verticalOffset: CGFloat = 10 // 垂直距离
+            var alertFrame = NSRect(
+                x: mouseLocation.x - alertSize.width / 2, // 水平居中
+                y: mouseLocation.y - alertSize.height - verticalOffset, // 垂直下方
+                width: alertSize.width,
+                height: alertSize.height
+            )
+            
+            // 确保警告框不会超出屏幕边界
+            if let screen = NSScreen.main {
+                let screenFrame = screen.visibleFrame
+                
+                if alertFrame.origin.x < screenFrame.origin.x {
+                    alertFrame.origin.x = screenFrame.origin.x
+                } else if alertFrame.origin.x + alertFrame.size.width > screenFrame.origin.x + screenFrame.size.width {
+                    alertFrame.origin.x = screenFrame.origin.x + screenFrame.size.width - alertFrame.size.width
                 }
                 
-                // 确保文本框获取焦点
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    iconNameField.becomeFirstResponder()
+                if alertFrame.origin.y < screenFrame.origin.y {
+                    alertFrame.origin.y = screenFrame.origin.y
+                } else if alertFrame.origin.y + alertFrame.size.height > screenFrame.origin.y + screenFrame.size.height {
+                    alertFrame.origin.y = screenFrame.origin.y + screenFrame.size.height - alertFrame.size.height
                 }
-            } else {
-                // 如果没有主窗口，使用默认方式显示
-                let response = alert.runModal()
+            }
+            
+            // 设置警告框的位置
+            alertWindow.setFrame(alertFrame, display: true)
+            alertWindow.level = .floating
+            alertWindow.makeKeyAndOrderFront(nil)
+            
+            // 显示警告框
+            let response = alert.runModal()
+            
+            // 确保文本框获取焦点
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                iconNameField.becomeFirstResponder()
+            }
+            
+            if response == .alertFirstButtonReturn { // OK button
+                let iconName = iconNameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
                 
-                if response == .alertFirstButtonReturn { // OK button
-                    let iconName = iconNameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                    
-                    if !iconName.isEmpty {
-                        // 尝试使用输入的符号名称创建图标，验证是否有效
-                        if NSImage(systemSymbolName: iconName, accessibilityDescription: device.name) != nil {
-                            // 更新设备的自定义图标名称
-                            self.bluetoothManager.updateDeviceCustomIcon(device, iconName: iconName)
-                            
-                            // 确保设备图标显示设置为true
-                            self.showDeviceIcons[device.id] = true
-                            self.saveDeviceDisplaySettings()
-                            
-                            // 更新状态栏图标
-                            self.updateStatusItems(devices: self.bluetoothManager.devices)
-                            
-                            // 显示成功消息
-                            self.showSuccessAlert(title: "Success", message: "Icon updated successfully for \(device.name)")
-                        } else {
-                            // 显示错误消息，符号名称无效
-                            self.showErrorAlert(title: "Error", message: "Invalid system symbol name. Please try another name.")
-                        }
-                    } else {
-                        // 清空图标，使用默认图标
-                        self.bluetoothManager.updateDeviceCustomIcon(device, iconName: nil)
+                if !iconName.isEmpty {
+                    // 尝试使用输入的符号名称创建图标，验证是否有效
+                    if NSImage(systemSymbolName: iconName, accessibilityDescription: device.name) != nil {
+                        // 更新设备的自定义图标名称
+                        bluetoothManager.updateDeviceCustomIcon(device, iconName: iconName)
                         
                         // 确保设备图标显示设置为true
-                        self.showDeviceIcons[device.id] = true
-                        self.saveDeviceDisplaySettings()
+                        showDeviceIcons[device.id] = true
+                        saveDeviceDisplaySettings()
                         
                         // 更新状态栏图标
-                        self.updateStatusItems(devices: self.bluetoothManager.devices)
+                        updateStatusItems(devices: bluetoothManager.devices)
                         
                         // 显示成功消息
-                        self.showSuccessAlert(title: "Success", message: "Icon reset to default for \(device.name)")
+                        showSuccessAlert(title: "Success", message: "Icon updated successfully for \(device.name)")
+                    } else {
+                        // 显示错误消息，符号名称无效
+                        showErrorAlert(title: "Error", message: "Invalid system symbol name. Please try another name.")
                     }
+                } else {
+                    // 清空图标，使用默认图标
+                    bluetoothManager.updateDeviceCustomIcon(device, iconName: nil)
+                    
+                    // 确保设备图标显示设置为true
+                    showDeviceIcons[device.id] = true
+                    saveDeviceDisplaySettings()
+                    
+                    // 更新状态栏图标
+                    updateStatusItems(devices: bluetoothManager.devices)
+                    
+                    // 显示成功消息
+                    showSuccessAlert(title: "Success", message: "Icon reset to default for \(device.name)")
                 }
             }
         }
