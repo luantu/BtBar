@@ -225,7 +225,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
         centralManager = CBCentralManager(delegate: self, queue: nil)
         setupBluetoothNotifications()
         // 启动电量监控
-        startBatteryMonitoring()
+        // startBatteryMonitoring() 不通过定时器，通过缓存刷新来触发。
     }
     
     private func setupBluetoothNotifications() {
@@ -254,10 +254,37 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
             queue: nil
         ) { [weak self] notification in
             let timestamp = localTimeString()
-            print("[\(timestamp)] **** 收到蓝牙相关通知: IOBluetoothDevicePublished")
-            print("[\(timestamp)] **** 通知对象: \(notification.object ?? "nil")")
+            print("[\(timestamp)] **** ✅ 收到蓝牙相关通知: IOBluetoothDevicePublished")
+            let objectDescription = "\((notification.object ?? "nil") as Any)".replacingOccurrences(of: "\n", with: " ")
+            print("[\(timestamp)] **** 通知对象: \(objectDescription)")
             print("[\(timestamp)] **** 通知对象类型: \(type(of: notification.object))")
-            self?.retrieveConnectedDevices()
+            
+            // 检查通知对象是否是 IOBluetoothDevice 类型
+            if let bluetoothDevice = notification.object as? IOBluetoothDevice {
+                // 获取设备的MAC地址作为ID
+                let deviceAddress = bluetoothDevice.addressString ?? ""
+                let deviceID = deviceAddress.isEmpty ? (bluetoothDevice.name ?? "Unknown") : deviceAddress
+                
+                // 检查设备在 BtBar 程序中是否已经标记为已连接
+                let isDeviceAlreadyConnectedInApp = self?.devices.contains { device in
+                    device.id == deviceID && device.isConnected
+                } ?? false
+                
+                print("[\(timestamp)] 设备在 BtBar 中的连接状态: \(isDeviceAlreadyConnectedInApp)")
+                
+                // 只有当设备在 BtBar 程序中未标记为已连接时，才处理通知
+                // 这样可以避免重复处理已经处理过的设备上线事件
+                if !isDeviceAlreadyConnectedInApp {
+                    print("[\(timestamp)] 设备在 BtBar 中未连接，处理 IOBluetoothDevicePublished 通知")
+                    self?.retrieveConnectedDevices()
+                } else {
+                    print("[\(timestamp)] 设备在 BtBar 中已连接，过滤 IOBluetoothDevicePublished 通知")
+                }
+            } else {
+                // 通知对象不是 IOBluetoothDevice 类型，仍然处理
+                print("[\(timestamp)] 通知对象不是 IOBluetoothDevice 类型，处理通知")
+                self?.retrieveConnectedDevices()
+            }
         }
         
         // 监听蓝牙设备销毁通知（设备断开时触发）
@@ -267,8 +294,9 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
             queue: nil
         ) { [weak self] notification in
             let timestamp = localTimeString()
-            print("[\(timestamp)] **** 收到蓝牙相关通知: IOBluetoothDeviceDestroyed")
-            print("[\(timestamp)] **** 通知对象: \(notification.object ?? "nil")")
+            print("[\(timestamp)] **** 🅾️ 收到蓝牙相关通知: IOBluetoothDeviceDestroyed")
+            let objectDescription = "\((notification.object ?? "nil") as Any)".replacingOccurrences(of: "\n", with: " ")
+            print("[\(timestamp)] **** 通知对象: \(objectDescription)")
             print("[\(timestamp)] **** 通知对象类型: \(type(of: notification.object))")
             self?.retrieveConnectedDevices()
         }
@@ -285,18 +313,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
         //     print("[\(timestamp)] **** 通知对象类型: \(type(of: notification.object))")
         //     self?.retrieveConnectedDevices()
         // }
-        
-        // 监听蓝牙状态变化通知
-        // NotificationCenter.default.addObserver(
-        //     forName: NSNotification.Name("CBCentralManagerStateChangedNotification"),
-        //     object: nil,
-        //     queue: nil
-        // ) { [weak self] notification in
-        //     let timestamp = localTimeString()
-        //     print("[\(timestamp)] **** 收到蓝牙状态变化通知，对象类型: \(type(of: notification.object))")
-        //     self?.retrieveConnectedDevices()
-        // }
-        
+ 
         // 监听所有蓝牙相关通知，用于调试
         // NotificationCenter.default.addObserver(
         //     forName: nil,
@@ -331,7 +348,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
             }
             
             // 启动定期刷新定时器
-            startRefreshTimer()
+            // startRefreshTimer()  定时器暂停，靠外部事件触发变化。
         }
     }
     
@@ -357,9 +374,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
     }
     
     public func retrieveConnectedDevices(completion: (() -> Void)? = nil) {
-        let startTime = Date()
         let timestamp = localTimeString()
-        print("[\(timestamp)] 开始处理蓝牙设备更新")
         
         // 检查缓存是否存在，如果不存在，同步等待缓存刷新
         if getCachedSystemProfilerData() == nil {
@@ -386,10 +401,8 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
             print("[\(timestamp)] **** 同步等待缓存刷新完成或超时")
         }
         
-        // 方法1: 使用IOBluetooth框架获取已配对的设备
+        // 使用IOBluetooth框架获取已配对的设备
         if let devicesArray = IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice] {
-            let devicesArrayTime = Date()
-            print("[\(timestamp)] 获取已配对设备列表完成，耗时: \(devicesArrayTime.timeIntervalSince(startTime) * 1000)ms, 设备数量: \(devicesArray.count)")
             
             // 保存已配对设备的ID，用于后续过滤
             var pairedDeviceIDs: Set<String> = []
@@ -406,12 +419,11 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
                     }
                     if !stillConnected {
                         hasDisconnectedDevice = true
+                        print("[\(timestamp)] 检测到设备断开: \(existingDevice.id)")
                         break
                     }
                 }
             }
-            
-            print("[\(timestamp)] 检测到设备断开: \(hasDisconnectedDevice)")
             
             for (_, bluetoothDevice) in devicesArray.enumerated() {
                 let deviceName = bluetoothDevice.name ?? "Unknown"
@@ -431,12 +443,9 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
                 // 优先使用从system_profiler获取的设备名称
                 var finalDeviceName = deviceName
                 if !addressString.isEmpty {
-                    let systemNameStartTime = Date()
                     if let systemName = getSystemDeviceName(for: addressString) {
                         finalDeviceName = systemName
                     }
-                    let systemNameTime = Date()
-                    print("[\(timestamp)] 获取设备系统名称完成，耗时: \(systemNameTime.timeIntervalSince(systemNameStartTime) * 1000)ms, 设备: \(deviceName)")
                 }
                 
                 pairedDeviceIDs.insert(deviceID)
@@ -457,7 +466,6 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
                 
                 // 只有已连接的设备才尝试获取电量信息，并且不是设备断开的情况
                 if isConnected && !hasDisconnectedDevice {
-                    let batteryStartTime = Date()
                     // 尝试获取真实电量
                     let tempDevice = BluetoothDevice(
                         id: deviceID,
@@ -484,8 +492,6 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
                         // 无法获取真实电量，设置为nil
                         batteryLevel = nil
                     }
-                    let batteryTime = Date()
-                    print("[\(timestamp)] 获取设备电量完成，耗时: \(batteryTime.timeIntervalSince(batteryStartTime) * 1000)ms, 设备: \(finalDeviceName)")
                 }
                 
                 // 获取设备的默认图标名称
@@ -507,12 +513,34 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
                 newDevices.append(device)
             }
             
-            let devicesProcessedTime = Date()
-            print("[\(timestamp)] 处理设备信息完成，耗时: \(devicesProcessedTime.timeIntervalSince(startTime) * 1000)ms")
-            
             // 替换设备列表，只保留已配对的设备
             DispatchQueue.main.async {
-                let mainQueueStartTime = Date()
+                
+                // 检查设备列表是否真正发生变化
+                var devicesChanged = false
+                if self.devices.count != newDevices.count {
+                    devicesChanged = true
+                } else {
+                    // 设备数量相同，检查每个设备的状态是否变化
+                    for (oldDevice, newDevice) in zip(self.devices, newDevices) {
+                        if oldDevice.id == newDevice.id {
+                            // 检查设备状态是否变化
+                            if oldDevice.isConnected != newDevice.isConnected ||
+                               oldDevice.batteryLevel != newDevice.batteryLevel ||
+                               oldDevice.leftBatteryLevel != newDevice.leftBatteryLevel ||
+                               oldDevice.rightBatteryLevel != newDevice.rightBatteryLevel ||
+                               oldDevice.caseBatteryLevel != newDevice.caseBatteryLevel {
+                                devicesChanged = true
+                                break
+                            }
+                        } else {
+                            // 设备ID不同，说明设备列表发生变化
+                            devicesChanged = true
+                            break
+                        }
+                    }
+                }
+                
                 // 更新设备列表
                 self.devices = newDevices
                 
@@ -521,30 +549,30 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
                 let statusBarManager = appDelegate?.statusBarManager
                 
                 if let statusBarManager = statusBarManager {
-                    let statusUpdateStartTime = Date()
                     statusBarManager.updateStatusItems(devices: self.devices)
-                    let statusUpdateTime = Date()
-                    print("[\(timestamp)] 更新状态栏图标完成，耗时: \(statusUpdateTime.timeIntervalSince(statusUpdateStartTime) * 1000)ms")
                 }
                 
-                // 发送设备列表更新通知，确保其他部分也能获取到最新状态
-                NotificationCenter.default.post(
-                    name: Notification.Name("BluetoothDevicesUpdatedNotification"),
-                    object: self,
-                    userInfo: ["devices": self.devices]
-                )
+                // 只有当设备信息真正变化时才发送通知
+                if devicesChanged {
+                    // 发送设备列表更新通知，确保其他部分也能获取到最新状态
+                    NotificationCenter.default.post(
+                        name: Notification.Name("BluetoothDevicesUpdatedNotification"),
+                        object: self,
+                        userInfo: ["devices": self.devices]
+                    )
+                    print("[\(timestamp)] 设备信息发生变化，发送BluetoothDevicesUpdatedNotification通知")
+                }
                 
                 // 调用回调函数，通知调用者设备列表已经更新完成
                 completion?()
-                
-                let mainQueueTime = Date()
-                print("[\(timestamp)] 主线程处理完成，耗时: \(mainQueueTime.timeIntervalSince(mainQueueStartTime) * 1000)ms")
-                print("[\(timestamp)] 整个设备更新过程完成，总耗时: \(mainQueueTime.timeIntervalSince(startTime) * 1000)ms")
             }
         } else {
             // 没有配对设备时，清空设备列表
             DispatchQueue.main.async {
-                let mainQueueStartTime = Date()
+                
+                // 检查设备列表是否真正发生变化
+                let devicesChanged = !self.devices.isEmpty
+                
                 self.devices.removeAll()
                 
                 // 立即触发StatusBarManager的updateStatusItems方法，确保状态栏图标立即更新
@@ -552,25 +580,23 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
                 let statusBarManager = appDelegate?.statusBarManager
                 
                 if let statusBarManager = statusBarManager {
-                    let statusUpdateStartTime = Date()
                     statusBarManager.updateStatusItems(devices: self.devices)
-                    let statusUpdateTime = Date()
-                    print("[\(timestamp)] 更新状态栏图标完成，耗时: \(statusUpdateTime.timeIntervalSince(statusUpdateStartTime) * 1000)ms")
                 }
                 
-                // 发送设备列表更新通知，确保其他部分也能获取到最新状态
-                NotificationCenter.default.post(
-                    name: Notification.Name("BluetoothDevicesUpdatedNotification"),
-                    object: self,
-                    userInfo: ["devices": self.devices]
-                )
+                // 当设备信息真正变化时才发送通知
+                if devicesChanged {
+                    // 发送设备列表更新通知，确保其他部分也能获取到最新状态
+                    NotificationCenter.default.post(
+                        name: Notification.Name("BluetoothDevicesUpdatedNotification"),
+                        object: self,
+                        userInfo: ["devices": self.devices]
+                    )
+                    print("[\(timestamp)] 设备信息发生变化，发送BluetoothDevicesUpdatedNotification通知")
+                }
                 
                 // 调用回调函数，通知调用者设备列表已经更新完成
                 completion?()
-                
-                let mainQueueTime = Date()
-                print("[\(timestamp)] 主线程处理完成，耗时: \(mainQueueTime.timeIntervalSince(mainQueueStartTime) * 1000)ms")
-                print("[\(timestamp)] 整个设备更新过程完成，总耗时: \(mainQueueTime.timeIntervalSince(startTime) * 1000)ms")
+ 
             }
         }
     }
@@ -1259,15 +1285,10 @@ class StatusBarManager {
     }
     
     internal func updateStatusItems(devices: [BluetoothDevice]) {
-        let startTime = Date()
         let timestamp = localTimeString()
-        print("[\(timestamp)] 开始更新状态栏图标，设备数量: \(devices.count)")
         
         // 确保在主队列中执行
         DispatchQueue.main.async {
-            let mainQueueStartTime = Date()
-            print("[\(timestamp)] 进入主线程，耗时: \(mainQueueStartTime.timeIntervalSince(startTime) * 1000)ms")
-            
             // 保留应用图标，只处理设备图标
             var appStatusItem: NSStatusItem?
             if !self.statusItems.isEmpty {
@@ -1317,8 +1338,7 @@ class StatusBarManager {
                     devicesToShow.append(device)
                 }
             }
-            print("[\(timestamp)] 筛选需要显示的设备，数量: \(devicesToShow.count)")
-
+            
             // 隐藏不再需要显示的设备图标，而不是移除它们，这样可以记住位置
             var devicesToHide: [String] = []
             for (deviceID, deviceInfo) in self.deviceStatusItems {
@@ -1328,6 +1348,7 @@ class StatusBarManager {
                     if let button = deviceInfo.statusItem.button {
                         button.isHidden = true
                         button.frame = NSRect(x: 0, y: 0, width: 0, height: button.frame.height)
+                        print("[\(timestamp)] 隐藏不需要显示的设备图标: \(deviceInfo.device.name)")
                     }
                     // 更新设备状态为断开连接
                     if var lastState = self.lastDeviceStates[deviceID] {
@@ -1336,7 +1357,7 @@ class StatusBarManager {
                     }
                 }
             }
-            print("[\(timestamp)] 隐藏不需要显示的设备图标，数量: \(devicesToHide.count)")
+            
             
             // 更新或添加需要显示的设备图标
             for device in devicesToShow {
@@ -1354,6 +1375,8 @@ class StatusBarManager {
                     continue
                 }
                 
+                print("[\(timestamp)] 需要显示的设备: \(device.name)")
+
                 let deviceUpdateStartTime = Date()
                 
                 // 更新设备状态
@@ -1550,9 +1573,6 @@ class StatusBarManager {
             
             // 清除菜单缓存，确保下次打开菜单时显示最新的设备状态
             self.cachedMenu = nil
-            
-            let mainQueueTime = Date()
-            print("[\(timestamp)] 状态栏图标更新完成，总耗时: \(mainQueueTime.timeIntervalSince(startTime) * 1000)ms")
         }
     }
     
@@ -2571,6 +2591,63 @@ class StatusBarManager {
         }
     }
     
+    // 显示 toast 通知
+    private func showToast(message: String) {
+        // 创建一个透明的窗口
+        let toastWindow = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 300, height: 60),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        
+        // 设置窗口属性
+        toastWindow.isOpaque = false
+        toastWindow.backgroundColor = NSColor.clear
+        toastWindow.level = .floating
+        toastWindow.ignoresMouseEvents = true
+        
+        // 创建内容视图
+        let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 60))
+        contentView.wantsLayer = true
+        contentView.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.7).cgColor
+        contentView.layer?.cornerRadius = 10
+        
+        // 创建文本标签
+        let label = NSTextField(labelWithString: message)
+        label.frame = NSRect(x: 20, y: 15, width: 260, height: 30)
+        label.textColor = .white
+        label.font = NSFont.systemFont(ofSize: 14)
+        label.alignment = .center
+        label.isBezeled = false
+        label.isEditable = false
+        label.drawsBackground = false
+        
+        // 添加标签到内容视图
+        contentView.addSubview(label)
+        
+        // 设置窗口内容
+        toastWindow.contentView = contentView
+        
+        // 计算窗口位置（屏幕中央偏下）
+        if let screen = NSScreen.main {
+            let screenFrame = screen.visibleFrame
+            let windowFrame = toastWindow.frame
+            toastWindow.setFrameOrigin(NSPoint(
+                x: screenFrame.origin.x + (screenFrame.size.width - windowFrame.size.width) / 2,
+                y: screenFrame.origin.y + screenFrame.size.height / 4
+            ))
+        }
+        
+        // 显示窗口
+        toastWindow.makeKeyAndOrderFront(nil)
+        
+        // 2秒后隐藏窗口
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            toastWindow.orderOut(nil)
+        }
+    }
+    
     @objc private func toggleDeviceStatusIcon(_ sender: NSMenuItem) {
         if let device = sender.representedObject as? BluetoothDevice {
             let currentValue = showDeviceIcons[device.id] ?? true
@@ -2746,13 +2823,13 @@ class StatusBarManager {
                 }
             }
             
-            // 在主线程中显示结果（如果需要）
+            // 在主线程中显示结果（使用 toast 通知）
             if showAlert {
                 DispatchQueue.main.async {
                     if success {
-                        self.showSuccessAlert(title: "Success", message: "Default audio device set to \(targetDeviceName)")
+                        self.showToast(message: "Default audio device set to \(targetDeviceName)")
                     } else {
-                        self.showErrorAlert(title: "Error", message: "Failed to set default audio device. Please try again.")
+                        self.showToast(message: "Failed to set default audio device. Please try again.")
                     }
                 }
             }
@@ -3700,6 +3777,9 @@ let cacheExpirationInterval: TimeInterval = 15 // 缓存过期时间（秒）
 class CacheManager {
     static let shared = CacheManager()
     
+    // 存储上一次的缓存内容，用于比较是否变化
+    private var lastCacheData: [String: Any]?
+    
     private init() {
         // 启动定期缓存刷新定时器
         startCacheRefreshTimer()
@@ -3733,15 +3813,21 @@ class CacheManager {
                     if let data = jsonString.data(using: .utf8) {
                         do {
                             if let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] {
+                                // 检查缓存是否真正发生变化
+                                let cacheChanged = self.isCacheChanged(newCache: json)
+                                
                                 // 更新缓存
                                 systemProfilerCache = (data: json, timestamp: Date())
-                                print("[\(localTimeString())] ***** 缓存已自动刷新 *****")
+                                self.lastCacheData = json
                                 
-                                // 发送缓存更新通知，触发设备信息更新
-                                NotificationCenter.default.post(
-                                    name: Notification.Name("SystemProfilerCacheUpdated"),
-                                    object: self
-                                )
+                                // 只有当缓存真正变化时，才发送缓存更新通知，触发设备信息更新
+                                if cacheChanged {
+                                    print("[\(localTimeString())] 缓存内容发生变化，发送SystemProfilerCacheUpdated通知")
+                                    NotificationCenter.default.post(
+                                        name: Notification.Name("SystemProfilerCacheUpdated"),
+                                        object: self
+                                    )
+                                }
                             }
                         } catch {
                             print("Error parsing system_profiler JSON: \(error)")
@@ -3752,6 +3838,78 @@ class CacheManager {
                 print("Error running system_profiler: \(error)")
             }
         }
+    }
+    
+    // 检查缓存是否真正发生变化
+    private func isCacheChanged(newCache: [String: Any]) -> Bool {
+        // 如果是第一次缓存，认为发生了变化
+        guard let lastCache = lastCacheData else {
+            return true
+        }
+        
+        // 提取关键设备信息进行比较
+        let lastDeviceInfo = extractDeviceInfo(from: lastCache)
+        let newDeviceInfo = extractDeviceInfo(from: newCache)
+        
+        // 比较关键设备信息是否相同
+        do {
+            let lastData = try JSONSerialization.data(withJSONObject: lastDeviceInfo, options: .sortedKeys)
+            let newData = try JSONSerialization.data(withJSONObject: newDeviceInfo, options: .sortedKeys)
+            return lastData != newData
+        } catch {
+            // 序列化失败，认为发生了变化
+            return true
+        }
+    }
+    
+    // 提取缓存中的关键设备信息
+    private func extractDeviceInfo(from cache: [String: Any]) -> [[String: Any]] {
+        var deviceInfo: [[String: Any]] = []
+        
+        // 从缓存中提取蓝牙设备数据
+        if let bluetoothData = cache["SPBluetoothDataType"] as? [[String: Any]] {
+            for bluetoothItem in bluetoothData {
+                // 处理已连接设备
+                if let connectedDevices = bluetoothItem["device_connected"] as? [[String: Any]] {
+                    for deviceDict in connectedDevices {
+                        for (name, deviceDetails) in deviceDict {
+                            if let details = deviceDetails as? [String: Any] {
+                                // 提取关键信息
+                                var keyInfo: [String: Any] = [:]
+                                keyInfo["name"] = name
+                                keyInfo["address"] = details["device_address"]
+                                keyInfo["batteryLevel"] = details["device_batteryLevel"]
+                                keyInfo["batteryLevelLeft"] = details["device_batteryLevelLeft"]
+                                keyInfo["batteryLevelRight"] = details["device_batteryLevelRight"]
+                                keyInfo["batteryLevelCase"] = details["device_batteryLevelCase"]
+                                keyInfo["batteryLevelMain"] = details["device_batteryLevelMain"]
+                                deviceInfo.append(keyInfo)
+                            }
+                        }
+                    }
+                }
+                
+                // 处理未连接设备
+                if let disconnectedDevices = bluetoothItem["device_not_connected"] as? [[String: Any]] {
+                    for deviceDict in disconnectedDevices {
+                        for (name, deviceDetails) in deviceDict {
+                            if let details = deviceDetails as? [String: Any] {
+                                // 提取关键信息
+                                var keyInfo: [String: Any] = [:]
+                                keyInfo["name"] = name
+                                keyInfo["address"] = details["device_address"]
+                                deviceInfo.append(keyInfo)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 按设备地址排序，确保顺序一致
+        deviceInfo.sort { ($0["address"] as? String ?? "") < ($1["address"] as? String ?? "") }
+        
+        return deviceInfo
     }
     
     // 获取缓存的system_profiler数据，只读取缓存，不触发刷新
@@ -3782,9 +3940,22 @@ class CacheManager {
                     if let data = jsonString.data(using: .utf8) {
                         do {
                             if let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] {
+                                // 检查缓存是否真正发生变化
+                                let cacheChanged = self.isCacheChanged(newCache: json)
+                                
                                 // 更新缓存
                                 systemProfilerCache = (data: json, timestamp: Date())
+                                self.lastCacheData = json
                                 print("[\(localTimeString())] ***** 后台缓存刷新完成 *****")
+                                
+                                // 只有当缓存真正变化时，才发送缓存更新通知，触发设备信息更新
+                                if cacheChanged {
+                                    print("[\(localTimeString())] 缓存内容发生变化，发送SystemProfilerCacheUpdated通知")
+                                    NotificationCenter.default.post(
+                                        name: Notification.Name("SystemProfilerCacheUpdated"),
+                                        object: self
+                                    )
+                                }
                             }
                         } catch {
                             print("Error parsing system_profiler JSON: \(error)")
