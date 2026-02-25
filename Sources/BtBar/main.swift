@@ -29,7 +29,6 @@ func getAudioDevices() -> [(id: AudioDeviceID, name: String)] {
     var propertySize: UInt32 = 0
     var result = AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &propertyAddress, 0, nil, &propertySize)
     if result != noErr {
-        print("Error getting audio devices size: \(result)")
         return devices
     }
     
@@ -37,7 +36,6 @@ func getAudioDevices() -> [(id: AudioDeviceID, name: String)] {
     var deviceIDs = [AudioDeviceID](repeating: 0, count: deviceCount)
     result = AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &propertyAddress, 0, nil, &propertySize, &deviceIDs)
     if result != noErr {
-        print("Error getting audio devices: \(result)")
         return devices
     }
     
@@ -71,24 +69,18 @@ func setDefaultAudioDevice(_ deviceID: AudioDeviceID) -> Bool {
     var mutableDeviceID = deviceID
     var result = AudioObjectSetPropertyData(AudioObjectID(kAudioObjectSystemObject), &propertyAddress, 0, nil, UInt32(MemoryLayout<AudioDeviceID>.size), &mutableDeviceID)
     if result != noErr {
-        print("Error setting default output device: \(result)")
         return false
     }
     
     // 尝试设置默认输入设备（如果设备同时支持输入）
     propertyAddress.mSelector = kAudioHardwarePropertyDefaultInputDevice
     result = AudioObjectSetPropertyData(AudioObjectID(kAudioObjectSystemObject), &propertyAddress, 0, nil, UInt32(MemoryLayout<AudioDeviceID>.size), &mutableDeviceID)
-    if result != noErr {
-        print("Warning: Error setting default input device: \(result)")
-        // 不返回失败，因为输出设备设置成功即可
-    }
+    // 不返回失败，因为输出设备设置成功即可
     
     // 尝试设置默认系统设备
     propertyAddress.mSelector = kAudioHardwarePropertyDefaultSystemOutputDevice
     result = AudioObjectSetPropertyData(AudioObjectID(kAudioObjectSystemObject), &propertyAddress, 0, nil, UInt32(MemoryLayout<AudioDeviceID>.size), &mutableDeviceID)
-    if result != noErr {
-        print("Warning: Error setting default system output device: \(result)")
-    }
+
     
     // 等待一小段时间，让系统完成切换
     usleep(100000) // 100ms
@@ -118,7 +110,6 @@ func getCurrentDefaultAudioDevice() -> (id: AudioDeviceID, name: String)? {
     let result = AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &propertyAddress, 0, nil, &propertySize, &deviceID)
     
     if result != noErr {
-        print("Error getting current default audio device: \(result)")
         return nil
     }
     
@@ -132,7 +123,6 @@ func getCurrentDefaultAudioDevice() -> (id: AudioDeviceID, name: String)? {
         AudioObjectGetPropertyData(deviceID, &propertyAddress, 0, nil, &nameSize, namePtr)
     }
     if nameResult != noErr {
-        print("Error getting current default audio device name: \(nameResult)")
         return (id: deviceID, name: "Unknown")
     }
     
@@ -239,381 +229,139 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
     }
     
     private func setupBluetoothNotifications() {
-        let timestamp = localTimeString()
-        print("\n=== Setting up Bluetooth notifications ===")
-        print("Timestamp: \(timestamp)")
-        
-        // 打印所有可用的IOBluetooth通知名称
-        print("\n=== Available IOBluetooth notifications ===")
-        print("IOBluetoothDeviceConnectedNotification")
-        print("IOBluetoothDeviceDisconnectedNotification")
-        print("IOBluetoothDevicePairedNotification")
-        print("IOBluetoothDeviceUnpairedNotification")
-        print("IOBluetoothAdapterPoweredOnNotification")
-        print("IOBluetoothAdapterPoweredOffNotification")
-        print("IOBluetoothDevicePublishedNotification")
-        print("IOBluetoothDeviceDestroyedNotification")
-        print("====================================================")
-        
         // 直接获取StatusBarManager实例，用于直接调用更新方法
         let appDelegate = NSApplication.shared.delegate as? AppDelegate
-        let statusBarManager = appDelegate?.statusBarManager
-        print("StatusBarManager instance: \(statusBarManager != nil ? "available" : "nil")")
+        _ = appDelegate?.statusBarManager
         
         // 监听蓝牙设备连接通知
-        print("Adding observer for IOBluetoothDeviceConnectedNotification")
         NotificationCenter.default.addObserver(
             forName: Notification.Name("IOBluetoothDeviceConnectedNotification"),
             object: nil,
             queue: nil
         ) { [weak self] notification in
-            let timestamp = localTimeString()
-            print("\n=== IOBluetoothDeviceConnectedNotification received ===")
-            print("Timestamp: \(timestamp)")
-            print("Notification: \(notification)")
-            print("Notification name: \(notification.name)")
-            print("Notification object: \(notification.object ?? "nil")")
-            
-            if let bluetoothDevice = notification.object as? IOBluetoothDevice {
-                print("Device name: \(bluetoothDevice.name ?? "Unknown")")
-                print("Device address: \(bluetoothDevice.addressString ?? "Unknown")")
-                print("Device is connected: \(bluetoothDevice.isConnected())")
-                
-                // 立即刷新设备列表
-                print("Calling retrieveConnectedDevices()...")
+            if notification.object is IOBluetoothDevice {
                 self?.retrieveConnectedDevices()
-                print("retrieveConnectedDevices() completed")
-            } else {
-                print("Notification object is not a IOBluetoothDevice")
-                print("Notification object type: \(type(of: notification.object))")
             }
-            print("===================================================")
         }
         
         // 监听蓝牙设备断开通知（带ed后缀）
-        print("Adding observer for IOBluetoothDeviceDisconnectedNotification")
         NotificationCenter.default.addObserver(
             forName: Notification.Name("IOBluetoothDeviceDisconnectedNotification"),
             object: nil,
             queue: nil
         ) { [weak self] notification in
-            let timestamp = localTimeString()
-            print("\n=== IOBluetoothDeviceDisconnectedNotification received ===")
-            print("Timestamp: \(timestamp)")
-            print("Notification: \(notification)")
-            print("Notification name: \(notification.name)")
-            print("Notification object: \(notification.object ?? "nil")")
-            
-            if let bluetoothDevice = notification.object as? IOBluetoothDevice {
-                print("Device name: \(bluetoothDevice.name ?? "Unknown")")
-                print("Device address: \(bluetoothDevice.addressString ?? "Unknown")")
-                print("Device is connected: \(bluetoothDevice.isConnected())")
-                
-                // 手动检查设备连接状态
-                print("Manual connection check: \(!bluetoothDevice.isConnected())")
-                
-                // 立即刷新设备列表
-                print("Calling retrieveConnectedDevices()...")
+            if notification.object is IOBluetoothDevice {
                 self?.retrieveConnectedDevices()
-                print("retrieveConnectedDevices() completed")
-                
-                // 设备列表更新后会自动触发UI更新，无需在此处直接更新
-                print("Device list refresh initiated, UI will be updated automatically")
-            } else {
-                print("Notification object is not a IOBluetoothDevice")
-                print("Notification object type: \(type(of: notification.object))")
             }
-            print("====================================================")
         }
         
         // 监听蓝牙设备断开通知（无ed后缀，可能是实际使用的通知名称）
-        print("Adding observer for IOBluetoothDeviceDisconnectNotification")
         NotificationCenter.default.addObserver(
             forName: Notification.Name("IOBluetoothDeviceDisconnectNotification"),
             object: nil,
             queue: nil
         ) { [weak self] notification in
-            let timestamp = localTimeString()
-            print("\n=== IOBluetoothDeviceDisconnectNotification received ===")
-            print("Timestamp: \(timestamp)")
-            print("Notification: \(notification)")
-            print("Notification name: \(notification.name)")
-            print("Notification object: \(notification.object ?? "nil")")
-            
-            if let bluetoothDevice = notification.object as? IOBluetoothDevice {
-                print("Device name: \(bluetoothDevice.name ?? "Unknown")")
-                print("Device address: \(bluetoothDevice.addressString ?? "Unknown")")
-                print("Device is connected: \(bluetoothDevice.isConnected())")
-                
-                // 手动检查设备连接状态
-                print("Manual connection check: \(!bluetoothDevice.isConnected())")
-                
-                // 立即刷新设备列表
-                print("Calling retrieveConnectedDevices()...")
+            if notification.object is IOBluetoothDevice {
                 self?.retrieveConnectedDevices()
-                print("retrieveConnectedDevices() completed")
-            } else {
-                print("Notification object is not a IOBluetoothDevice")
-                print("Notification object type: \(type(of: notification.object))")
             }
-            print("====================================================")
         }
         
         // 监听蓝牙设备销毁通知
-        print("Adding observer for IOBluetoothDeviceDestroyedNotification")
         NotificationCenter.default.addObserver(
             forName: Notification.Name("IOBluetoothDeviceDestroyedNotification"),
             object: nil,
             queue: nil
         ) { [weak self] notification in
-            let timestamp = localTimeString()
-            print("\n=== IOBluetoothDeviceDestroyedNotification received ===")
-            print("Timestamp: \(timestamp)")
-            print("Notification: \(notification)")
-            print("Notification name: \(notification.name)")
-            print("Notification object: \(notification.object ?? "nil")")
-            
-            if let bluetoothDevice = notification.object as? IOBluetoothDevice {
-                print("Device name: \(bluetoothDevice.name ?? "Unknown")")
-                print("Device address: \(bluetoothDevice.addressString ?? "Unknown")")
-                print("Device is connected: \(bluetoothDevice.isConnected())")
-                
-                // 立即刷新设备列表
-                print("Calling retrieveConnectedDevices()...")
+            if notification.object is IOBluetoothDevice {
                 self?.retrieveConnectedDevices()
-                print("retrieveConnectedDevices() completed")
-                
-                // 设备列表更新后会自动触发UI更新，无需在此处直接更新
-                print("Device list refresh initiated, UI will be updated automatically")
-            } else {
-                print("Notification object is not a IOBluetoothDevice")
-                print("Notification object type: \(type(of: notification.object))")
             }
-            print("====================================================")
         }
         
         // 监听蓝牙设备配对通知
-        print("Adding observer for IOBluetoothDevicePairedNotification")
         NotificationCenter.default.addObserver(
             forName: NSNotification.Name("IOBluetoothDevicePairedNotification"),
             object: nil,
             queue: nil
         ) { [weak self] notification in
-            if let bluetoothDevice = notification.object as? IOBluetoothDevice {
-                print("Device paired: \(bluetoothDevice.name ?? "Unknown")")
+            if notification.object is IOBluetoothDevice {
                 self?.retrieveConnectedDevices()
             }
         }
         
         // 监听蓝牙设备取消配对通知
-        print("Adding observer for IOBluetoothDeviceUnpairedNotification")
         NotificationCenter.default.addObserver(
             forName: NSNotification.Name("IOBluetoothDeviceUnpairedNotification"),
             object: nil,
             queue: nil
         ) { [weak self] notification in
-            if let bluetoothDevice = notification.object as? IOBluetoothDevice {
-                print("Device unpaired: \(bluetoothDevice.name ?? "Unknown")")
+            if notification.object is IOBluetoothDevice {
                 self?.retrieveConnectedDevices()
             }
         }
         
         // 监听蓝牙状态变化通知
-        print("Adding observer for CBCentralManagerStateChangedNotification")
         NotificationCenter.default.addObserver(
             forName: NSNotification.Name("CBCentralManagerStateChangedNotification"),
             object: nil,
             queue: nil
         ) { [weak self] notification in
-            print("Bluetooth central manager state changed")
             self?.retrieveConnectedDevices()
         }
         
-        // 添加全局通知监听，捕获所有通知
-        print("Adding observer for ALL notifications (for debugging)")
-        NotificationCenter.default.addObserver(
-            forName: nil,
-            object: nil,
-            queue: nil
-        ) {[weak self] notification in
-            let name = notification.name.rawValue
-            if name.contains("Bluetooth") || name.contains("IOBluetooth") {
-                let timestamp = localTimeString()
-                print("[\(timestamp)] Bluetooth-related notification: \(name)")
-                print("[\(timestamp)] Notification object: \(notification.object ?? "nil")")
-                print("[\(timestamp)] Notification userInfo: \(notification.userInfo ?? [:])")
-                
-                // 立即处理IOBluetoothDevicePublished通知
-                if name == "IOBluetoothDevicePublished" {
-                    print("[\(timestamp)] Immediately handling IOBluetoothDevicePublished notification...")
-                    self?.retrieveConnectedDevices()
-                }
-                
-                // 立即处理IOBluetoothDeviceDestroyed和IOBluetoothDeviceDisconnected通知
-                if name == "IOBluetoothDeviceDestroyed" || name == "IOBluetoothDeviceDisconnected" {
-                    print("[\(timestamp)] Immediately handling disconnection notification...")
-                    self?.retrieveConnectedDevices()
-                }
-            }
-        }
-        
         // 监听蓝牙设备发布通知
-        print("Adding observer for IOBluetoothDevicePublishedNotification")
         NotificationCenter.default.addObserver(
             forName: Notification.Name("IOBluetoothDevicePublishedNotification"),
             object: nil,
             queue: nil
         ) { [weak self] notification in
-            let timestamp = localTimeString()
-            print("\n=== IOBluetoothDevicePublishedNotification received ===")
-            print("Timestamp: \(timestamp)")
-            print("Notification: \(notification)")
-            print("Notification name: \(notification.name)")
-            print("Notification object: \(notification.object ?? "nil")")
-            
-            if let bluetoothDevice = notification.object as? IOBluetoothDevice {
-                print("Device name: \(bluetoothDevice.name ?? "Unknown")")
-                print("Device address: \(bluetoothDevice.addressString ?? "Unknown")")
-                print("Device is connected: \(bluetoothDevice.isConnected())")
-                print("Device is paired: \(bluetoothDevice.isPaired())")
-                
-                // 无论设备当前连接状态如何，都直接刷新设备列表
-                // 系统可能只发送这个通告，需要立即处理
-                print("Treating device published as connected, calling retrieveConnectedDevices()...")
-                
-                // 立即调用retrieveConnectedDevices()
+            if notification.object is IOBluetoothDevice {
                 self?.retrieveConnectedDevices()
-                
-                // 设备列表更新后会自动触发UI更新，无需在此处直接更新
-                print("Device list refresh initiated, UI will be updated automatically")
-            } else {
-                print("Notification object is not a IOBluetoothDevice")
-                print("Notification object type: \(type(of: notification.object))")
             }
-            print("====================================================")
         }
         
         // 监听蓝牙设备连接通知（无ed后缀）
-        print("Adding observer for IOBluetoothDeviceConnectNotification")
         NotificationCenter.default.addObserver(
             forName: Notification.Name("IOBluetoothDeviceConnectNotification"),
             object: nil,
             queue: nil
         ) { [weak self] notification in
-            let timestamp = localTimeString()
-            print("\n=== IOBluetoothDeviceConnectNotification received ===")
-            print("Timestamp: \(timestamp)")
-            print("Notification: \(notification)")
-            print("Notification name: \(notification.name)")
-            print("Notification object: \(notification.object ?? "nil")")
-            
-            if let bluetoothDevice = notification.object as? IOBluetoothDevice {
-                print("Device name: \(bluetoothDevice.name ?? "Unknown")")
-                print("Device address: \(bluetoothDevice.addressString ?? "Unknown")")
-                print("Device is connected: \(bluetoothDevice.isConnected())")
-                
-                // 立即刷新设备列表
-                print("Calling retrieveConnectedDevices()...")
+            if notification.object is IOBluetoothDevice {
                 self?.retrieveConnectedDevices()
-                print("retrieveConnectedDevices() completed")
-            } else {
-                print("Notification object is not a IOBluetoothDevice")
-                print("Notification object type: \(type(of: notification.object))")
             }
-            print("===================================================")
         }
         
         // 监听蓝牙设备连接通知（其他可能的格式）
-        print("Adding observer for IOBluetoothDeviceConnectionNotification")
         NotificationCenter.default.addObserver(
             forName: Notification.Name("IOBluetoothDeviceConnectionNotification"),
             object: nil,
             queue: nil
         ) { [weak self] notification in
-            let timestamp = localTimeString()
-            print("\n=== IOBluetoothDeviceConnectionNotification received ===")
-            print("Timestamp: \(timestamp)")
-            print("Notification: \(notification)")
-            print("Notification name: \(notification.name)")
-            print("Notification object: \(notification.object ?? "nil")")
-            
-            if let bluetoothDevice = notification.object as? IOBluetoothDevice {
-                print("Device name: \(bluetoothDevice.name ?? "Unknown")")
-                print("Device address: \(bluetoothDevice.addressString ?? "Unknown")")
-                print("Device is connected: \(bluetoothDevice.isConnected())")
-                
-                // 立即刷新设备列表
-                print("Calling retrieveConnectedDevices()...")
+            if notification.object is IOBluetoothDevice {
                 self?.retrieveConnectedDevices()
-                print("retrieveConnectedDevices() completed")
-            } else {
-                print("Notification object is not a IOBluetoothDevice")
-                print("Notification object type: \(type(of: notification.object))")
             }
-            print("===================================================")
         }
         
         // 监听蓝牙设备链接建立通知
-        print("Adding observer for IOBluetoothDeviceLinkUpNotification")
         NotificationCenter.default.addObserver(
             forName: Notification.Name("IOBluetoothDeviceLinkUpNotification"),
             object: nil,
             queue: nil
         ) { [weak self] notification in
-            let timestamp = localTimeString()
-            print("\n=== IOBluetoothDeviceLinkUpNotification received ===")
-            print("Timestamp: \(timestamp)")
-            print("Notification: \(notification)")
-            print("Notification name: \(notification.name)")
-            print("Notification object: \(notification.object ?? "nil")")
-            
-            if let bluetoothDevice = notification.object as? IOBluetoothDevice {
-                print("Device name: \(bluetoothDevice.name ?? "Unknown")")
-                print("Device address: \(bluetoothDevice.addressString ?? "Unknown")")
-                print("Device is connected: \(bluetoothDevice.isConnected())")
-                
-                // 立即刷新设备列表
-                print("Calling retrieveConnectedDevices()...")
+            if notification.object is IOBluetoothDevice {
                 self?.retrieveConnectedDevices()
-                print("retrieveConnectedDevices() completed")
-            } else {
-                print("Notification object is not a IOBluetoothDevice")
-                print("Notification object type: \(type(of: notification.object))")
             }
-            print("===================================================")
         }
         
         // 监听蓝牙设备就绪通知
-        print("Adding observer for IOBluetoothDeviceReadyNotification")
         NotificationCenter.default.addObserver(
             forName: Notification.Name("IOBluetoothDeviceReadyNotification"),
             object: nil,
             queue: nil
         ) { [weak self] notification in
-            let timestamp = localTimeString()
-            print("\n=== IOBluetoothDeviceReadyNotification received ===")
-            print("Timestamp: \(timestamp)")
-            print("Notification: \(notification)")
-            print("Notification name: \(notification.name)")
-            print("Notification object: \(notification.object ?? "nil")")
-            
-            if let bluetoothDevice = notification.object as? IOBluetoothDevice {
-                print("Device name: \(bluetoothDevice.name ?? "Unknown")")
-                print("Device address: \(bluetoothDevice.addressString ?? "Unknown")")
-                print("Device is connected: \(bluetoothDevice.isConnected())")
-                
-                // 立即刷新设备列表
-                print("Calling retrieveConnectedDevices()...")
+            if notification.object is IOBluetoothDevice {
                 self?.retrieveConnectedDevices()
-                print("retrieveConnectedDevices() completed")
-            } else {
-                print("Notification object is not a IOBluetoothDevice")
-                print("Notification object type: \(type(of: notification.object))")
             }
-            print("===================================================")
         }
-        
-        print("=== Bluetooth notifications setup completed ===")
     }
     
     func startScanning() {
@@ -637,67 +385,37 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
     }
     
     private func startRefreshTimer() {
-        print("\n=== Starting refresh timer ===")
-        print("Current time: \(localTimeString())")
-        
         // 取消现有的定时器
         if refreshTimer != nil {
-            print("Cancelling existing refresh timer")
             refreshTimer?.invalidate()
             refreshTimer = nil
         }
         
         // 由于添加了完善的被动监听机制，将轮询间隔从30秒增加到60秒
         // 轮询现在仅作为备用机制
-        print("Creating new refresh timer with 60-second interval")
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] timer in
-            print("\n=== Refresh timer fired ===")
-            print("Current time: \(localTimeString())")
-            print("Timer valid: \(timer.isValid)")
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
             self?.retrieveConnectedDevices()
-            print("Refresh timer task completed")
         }
-        
-        print("Refresh timer started successfully")
-        print("Timer valid: \(refreshTimer?.isValid ?? false)")
-        print("=============================")
     }
     
     func stopRefreshTimer() {
-        print("\n=== Stopping refresh timer ===")
-        print("Current time: \(localTimeString())")
-        
         if refreshTimer != nil {
-            print("Cancelling refresh timer")
             refreshTimer?.invalidate()
             refreshTimer = nil
-            print("Refresh timer stopped")
-        } else {
-            print("No active refresh timer to stop")
         }
-        print("=============================")
     }
     
     public func retrieveConnectedDevices(completion: (() -> Void)? = nil) {
-        let timestamp = localTimeString()
-        print("\n=== retrieveConnectedDevices() started ===")
-        print("Timestamp: \(timestamp)")
-        print("Current devices count: \(devices.count)")
-        
         // 预先获取system_profiler数据并缓存，避免多个设备重复调用
-        print("Preloading system_profiler data...")
-        getCachedSystemProfilerData()
+        _ = getCachedSystemProfilerData()
         
         // 方法1: 使用IOBluetooth框架获取已配对的设备
-        print("Calling IOBluetoothDevice.pairedDevices()...")
         if let devicesArray = IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice] {
-            print("Found \(devicesArray.count) paired devices")
-            
             // 保存已配对设备的ID，用于后续过滤
             var pairedDeviceIDs: Set<String> = []
             var newDevices: [BluetoothDevice] = []
             
-            for (index, bluetoothDevice) in devicesArray.enumerated() {
+            for (_, bluetoothDevice) in devicesArray.enumerated() {
                 let deviceName = bluetoothDevice.name ?? "Unknown"
                 
                 // 使用设备的Mac地址作为ID
@@ -717,7 +435,6 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
                 if !addressString.isEmpty {
                     if let systemName = getSystemDeviceName(for: addressString) {
                         finalDeviceName = systemName
-                        print("  Using system profiler name: \(systemName)")
                     }
                 }
                 
@@ -729,10 +446,6 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
                 
                 // 检查设备是否已连接
                 let isConnected = bluetoothDevice.isConnected()
-                print("Device \(index + 1): \(finalDeviceName)")
-                print("  Address: \(addressString)")
-                print("  Is connected: \(isConnected)")
-                print("  Custom icon: \(customIconName ?? "nil")")
                 
                 // 创建蓝牙设备对象
                 // 优先尝试获取真实电量，失败则设置为nil
@@ -763,23 +476,10 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
                         caseBatteryLevel = batteryLevels.caseLevel
                         leftBatteryLevel = batteryLevels.leftLevel
                         rightBatteryLevel = batteryLevels.rightLevel
-                        print("  Battery level: \(batteryLevel ?? 0)% (真实获取)")
-                        if let caseLevel = caseBatteryLevel {
-                            print("  Case battery: \(caseLevel)%")
-                        }
-                        if let leftLevel = leftBatteryLevel {
-                            print("  Left battery: \(leftLevel)%")
-                        }
-                        if let rightLevel = rightBatteryLevel {
-                            print("  Right battery: \(rightLevel)%")
-                        }
                     } else {
                         // 无法获取真实电量，设置为nil
                         batteryLevel = nil
-                        print("  Battery level: - (无法获取)")
                     }
-                } else {
-                    print("  Battery level: nil (not connected)")
                 }
                 
                 // 获取设备的默认图标名称
@@ -802,32 +502,9 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
             }
             
             // 替换设备列表，只保留已配对的设备
-            print("Preparing to update devices list...")
-            print("Old devices count: \(devices.count)")
-            print("New devices count: \(newDevices.count)")
-            
             DispatchQueue.main.async {
-                let updateTimestamp = localTimeString()
-                print("[\(updateTimestamp)] Updating devices list in main queue...")
-                
-                // 计算状态变化
-                var connectedCount = 0
-                var disconnectedCount = 0
-                
-                for device in newDevices {
-                    if device.isConnected {
-                        connectedCount += 1
-                    } else {
-                        disconnectedCount += 1
-                    }
-                }
-                
-                print("[\(updateTimestamp)] New state - Connected: \(connectedCount), Disconnected: \(disconnectedCount)")
-                
                 // 更新设备列表
                 self.devices = newDevices
-                print("[\(updateTimestamp)] Devices list updated successfully")
-                print("[\(updateTimestamp)] Current devices count: \(self.devices.count)")
                 
                 // 发送设备列表更新通知，确保状态栏和菜单立即更新
                 NotificationCenter.default.post(
@@ -835,18 +512,14 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
                     object: self,
                     userInfo: ["devices": self.devices]
                 )
-                print("[\(updateTimestamp)] BluetoothDevicesUpdatedNotification posted")
                 
                 // 立即触发StatusBarManager的updateStatusItems方法，确保状态栏图标立即更新
                 DispatchQueue.main.async {
                     let appDelegate = NSApplication.shared.delegate as? AppDelegate
                     let statusBarManager = appDelegate?.statusBarManager
-                    print("[\(updateTimestamp)] Directly triggering StatusBarManager update...")
                     
                     if let statusBarManager = statusBarManager {
-                        print("[\(updateTimestamp)] Calling updateStatusItems with \(self.devices.count) devices...")
                         statusBarManager.updateStatusItems(devices: self.devices)
-                        print("[\(updateTimestamp)] StatusBarManager update completed")
                     }
                 }
                 
@@ -854,13 +527,9 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
                 completion?()
             }
         } else {
-            print("No paired devices found")
             // 没有配对设备时，清空设备列表
             DispatchQueue.main.async {
-                let updateTimestamp = localTimeString()
-                print("[\(updateTimestamp)] Clearing devices list - no paired devices found")
                 self.devices.removeAll()
-                print("[\(updateTimestamp)] Devices list cleared")
                 
                 // 发送设备列表更新通知，确保状态栏和菜单立即更新
                 NotificationCenter.default.post(
@@ -868,18 +537,14 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
                     object: self,
                     userInfo: ["devices": self.devices]
                 )
-                print("[\(updateTimestamp)] BluetoothDevicesUpdatedNotification posted for empty list")
                 
                 // 立即触发StatusBarManager的updateStatusItems方法，确保状态栏图标立即更新
                 DispatchQueue.main.async {
                     let appDelegate = NSApplication.shared.delegate as? AppDelegate
                     let statusBarManager = appDelegate?.statusBarManager
-                    print("[\(updateTimestamp)] Directly triggering StatusBarManager update for empty list...")
                     
                     if let statusBarManager = statusBarManager {
-                        print("[\(updateTimestamp)] Calling updateStatusItems with empty device list...")
                         statusBarManager.updateStatusItems(devices: self.devices)
-                        print("[\(updateTimestamp)] StatusBarManager update completed for empty list")
                     }
                 }
                 
@@ -887,7 +552,6 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
                 completion?()
             }
         }
-        print("=== retrieveConnectedDevices() completed ===")
     }
     
     // 连接尝试记录
@@ -1014,28 +678,11 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
     // 尝试从设备获取真实电量
     func fetchRealBatteryLevel(for device: BluetoothDevice) -> (caseLevel: Int?, leftLevel: Int?, rightLevel: Int?, generalLevel: Int?) {
         // 仅使用system_profiler SPBluetoothDataType -json获取电量
-        print("[\(localTimeString())] 尝试获取设备电量: \(device.name)")
-        print("[\(localTimeString())] 设备地址: \(device.macAddress)")
-        
         let batteryLevels = getAirPodsBatteryLevel(deviceName: device.name, deviceAddress: device.macAddress)
         if batteryLevels.caseLevel != nil || batteryLevels.leftLevel != nil || batteryLevels.rightLevel != nil || batteryLevels.generalLevel != nil {
-            print("[\(localTimeString())] 通过system_profiler获取到电量")
-            if let caseLevel = batteryLevels.caseLevel {
-                print("  充电盒电量: \(caseLevel)%")
-            }
-            if let leftLevel = batteryLevels.leftLevel {
-                print("  左耳电量: \(leftLevel)%")
-            }
-            if let rightLevel = batteryLevels.rightLevel {
-                print("  右耳电量: \(rightLevel)%")
-            }
-            if let generalLevel = batteryLevels.generalLevel {
-                print("  通用电量: \(generalLevel)%")
-            }
             return batteryLevels
         }
         
-        print("[\(localTimeString())] 无法获取真实电量，返回nil")
         return (nil, nil, nil, nil) // 不使用模拟电量，返回nil表示无法获取
     }
     
@@ -1100,12 +747,9 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
     
     // 获取AirPods等苹果设备的电量
     private func getAirPodsBatteryLevel(deviceName: String, deviceAddress: String) -> (caseLevel: Int?, leftLevel: Int?, rightLevel: Int?, generalLevel: Int?) {
-        print("[\(localTimeString())] 尝试获取AirPods电量: \(deviceName), 地址: \(deviceAddress)")
-        
         // 使用缓存的system_profiler数据
         guard let json = getCachedSystemProfilerData(),
               let bluetoothData = json["SPBluetoothDataType"] as? [[String: Any]] else {
-            print("[\(localTimeString())] 无法获取system_profiler数据")
             return (nil, nil, nil, nil)
         }
         
@@ -1117,7 +761,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
         for bluetoothItem in bluetoothData {
             if let connectedDevices = bluetoothItem["device_connected"] as? [[String: Any]] {
                 for deviceItem in connectedDevices {
-                    for (deviceKey, deviceInfo) in deviceItem {
+                    for (_, deviceInfo) in deviceItem {
                         if let deviceDetails = deviceInfo as? [String: Any] {
                             // 获取设备地址并与目标设备地址比对
                             if let deviceAddressValue = deviceDetails["device_address"] as? String {
@@ -1126,27 +770,22 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
                                 let formattedDeviceAddress = deviceAddressValue.replacingOccurrences(of: ":", with: "").replacingOccurrences(of: "-", with: "").uppercased()
                                 
                                 if formattedTargetAddress == formattedDeviceAddress {
-                                    print("[\(localTimeString())] 找到匹配的设备: \(deviceKey)")
-                                    
                                     // 提取电量信息
                                     if let caseBattery = deviceDetails["device_batteryLevelCase"] as? String {
                                         if let level = Int(caseBattery.replacingOccurrences(of: "%", with: "")) {
                                             caseLevel = level
-                                            print("[\(localTimeString())] 成功获取充电盒电量: \(level)%")
                                         }
                                     }
                                     
                                     if let leftBattery = deviceDetails["device_batteryLevelLeft"] as? String {
                                         if let level = Int(leftBattery.replacingOccurrences(of: "%", with: "")) {
                                             leftLevel = level
-                                            print("[\(localTimeString())] 成功获取左耳电量: \(level)%")
                                         }
                                     }
                                     
                                     if let rightBattery = deviceDetails["device_batteryLevelRight"] as? String {
                                         if let level = Int(rightBattery.replacingOccurrences(of: "%", with: "")) {
                                             rightLevel = level
-                                            print("[\(localTimeString())] 成功获取右耳电量: \(level)%")
                                         }
                                     }
                                     
@@ -1154,7 +793,6 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
                                     if let batteryLevel = deviceDetails["device_batteryLevel"] as? String {
                                         if let level = Int(batteryLevel.replacingOccurrences(of: "%", with: "")) {
                                             generalLevel = level
-                                            print("[\(localTimeString())] 成功获取通用设备电量: \(level)%")
                                         }
                                     }
                                     
@@ -1162,7 +800,6 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
                                     if let mainBattery = deviceDetails["device_batteryLevelMain"] as? String {
                                         if let level = Int(mainBattery.replacingOccurrences(of: "%", with: "")) {
                                             generalLevel = level
-                                            print("[\(localTimeString())] 成功获取非苹果设备主电量: \(level)%")
                                         }
                                     }
                                     
@@ -1176,7 +813,6 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
             }
         }
         
-        print("[\(localTimeString())] 未找到匹配的设备电量信息")
         return (nil, nil, nil, nil)
     }
     
@@ -1339,30 +975,17 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
     // MARK: - CBCentralManagerDelegate
     
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
-        let timestamp = localTimeString()
-        print("\n=== Bluetooth state changed ===")
-        print("Timestamp: \(timestamp)")
-        
         switch central.state {
         case .poweredOn:
-            print("Bluetooth is on")
             // 当蓝牙开启时，立即开始扫描
             DispatchQueue.main.async {
-                print("[\(localTimeString())] Starting Bluetooth device scan...")
                 self.startScanning()
             }
-        case .poweredOff:
-            print("Bluetooth is off - cannot scan for devices")
-        case .unauthorized:
-            print("Bluetooth is unauthorized - check privacy settings")
-        case .unsupported:
-            print("Bluetooth is unsupported on this device")
-        case .unknown:
-            print("Bluetooth state is unknown")
-        case .resetting:
-            print("Bluetooth is resetting")
+        case .poweredOff, .unauthorized, .unsupported, .unknown, .resetting:
+            // 其他状态不需要处理
+            break
         @unknown default:
-            print("Unknown Bluetooth state")
+            break
         }
     }
     
@@ -1378,15 +1001,12 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
     }
     
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        let timestamp = localTimeString()
-        print("\n=== Device connected ===")
-        print("Timestamp: \(timestamp)")
-        print("Peripheral connected: \(peripheral.name ?? "Unknown") - \(peripheral.identifier.uuidString)")
+
         
         // 更新设备连接状态
         DispatchQueue.main.async {
             if let index = self.devices.firstIndex(where: { $0.id == peripheral.identifier.uuidString }) {
-                print("[\(localTimeString())] Updating device state for: \(self.devices[index].name)")
+
                 self.devices[index].isConnected = true
                 // 尝试获取真实电量，失败则使用默认值
                 var batteryLevel: Int
@@ -1421,26 +1041,16 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
                     self.devices[index].rightBatteryLevel = nil
                     self.devices[index].batteryLevel = batteryLevel
                 }
-                print("[\(localTimeString())] Device \(self.devices[index].name) connected with battery: \(batteryLevel)%")
-                
                 // 检查是否需要发送低电量提醒
                 self.checkBatteryLevel(for: self.devices[index])
-                
-                // 设备连接后会通过状态监听自动更新状态栏
-                print("[\(localTimeString())] Device connected, status bar will be updated via listener")
-            } else {
-                print("[\(localTimeString())] Device not found in devices list")
             }
         }
-        print("========================")
+
     }
     
     private func checkBatteryLevel(for device: BluetoothDevice) {
-        let timestamp = localTimeString()
-        print("[\(timestamp)] Checking battery level for: \(device.name)")
         // 检查设备电量并发送低电量提醒
         if let batteryLevel = device.batteryLevel, batteryLevel < 15 {
-            print("[\(timestamp)] Low battery detected: \(batteryLevel)%")
             sendLowBatteryNotification(for: device)
             
             // 触发设备详情弹窗
@@ -1455,8 +1065,6 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
     }
     
     private func sendLowBatteryNotification(for device: BluetoothDevice) {
-        let timestamp = localTimeString()
-        print("[\(timestamp)] Sending low battery notification for: \(device.name)")
         // 检查是否在支持的环境中运行
         if Bundle.main.bundlePath != "" && Bundle.main.bundleIdentifier != nil {
             // 创建通知内容
@@ -1473,80 +1081,37 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
             
             // 添加通知请求
             let center = UNUserNotificationCenter.current()
-            center.add(request) { error in
-                if let error = error {
-                        print("[\(localTimeString())] Error sending notification: \(error)")
-                    } else {
-                        print("[\(localTimeString())] Notification sent successfully")
-                    }
+            center.add(request) { _ in
+                // 忽略通知发送结果，不输出日志
             }
         }
     }
     
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
-        let timestamp = localTimeString()
-        print("\n=== CBCentralManager didDisconnectPeripheral ===")
-        print("Timestamp: \(timestamp)")
-        print("Peripheral name: \(peripheral.name ?? "Unknown")")
-        print("Peripheral UUID: \(peripheral.identifier.uuidString)")
-        
         if let error = error {
-            print("Disconnection error: \(error)")
-            print("Error code: \((error as NSError).code)")
-            print("Error domain: \((error as NSError).domain)")
             // 处理断开连接错误
             handleBluetoothError(error, for: peripheral)
-        } else {
-            print("Disconnection completed without error")
         }
         
-        // 立即检查中央管理器状态
-        print("Central manager state: \(central.state)")
-        
         // 更新设备断开状态
-        print("Updating device state in main queue...")
         DispatchQueue.main.async {
-            let updateTimestamp = localTimeString()
-            print("[\(updateTimestamp)] Main queue update started")
-            
             if let index = self.devices.firstIndex(where: { $0.id == peripheral.identifier.uuidString }) {
-                print("[\(updateTimestamp)] Found device in list: \(self.devices[index].name)")
-                print("[\(updateTimestamp)] Current device state - isConnected: \(self.devices[index].isConnected)")
-                
                 // 更新设备状态
                 self.devices[index].isConnected = false
                 self.devices[index].batteryLevel = nil
                 
-                print("[\(updateTimestamp)] Updated device state - isConnected: \(self.devices[index].isConnected)")
-                print("[\(updateTimestamp)] Battery level cleared")
-                
                 // 手动调用retrieveConnectedDevices确保状态同步
-                print("[\(updateTimestamp)] Calling retrieveConnectedDevices() for sync...")
                 self.retrieveConnectedDevices()
-                print("[\(updateTimestamp)] retrieveConnectedDevices() completed")
-                
-                // 设备断开后会通过状态监听自动更新状态栏
-                print("[\(updateTimestamp)] Device disconnected, status bar will be updated")
             } else {
-                print("[\(updateTimestamp)] Device not found in devices list")
-                print("[\(updateTimestamp)] Calling retrieveConnectedDevices() to refresh list...")
+                // 设备不在列表中，刷新设备列表
                 self.retrieveConnectedDevices()
             }
-            print("[\(updateTimestamp)] Main queue update completed")
         }
-        print("=== Disconnection handling completed ===")
-
     }
     
     // 添加连接错误处理
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
-        let timestamp = localTimeString()
-        print("\n=== Connection failed ===")
-        print("Timestamp: \(timestamp)")
-        print("Failed to connect to: \(peripheral.name ?? "Unknown") - \(peripheral.identifier.uuidString)")
-        
         if let error = error {
-            print("Connection error: \(error)")
             handleBluetoothError(error, for: peripheral)
         }
         
@@ -1557,18 +1122,21 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
     
     // 处理蓝牙错误
     private func handleBluetoothError(_ error: Error, for peripheral: CBPeripheral) {
+        // 错误处理逻辑保持不变，但移除日志输出
         let errorCode = (error as NSError).code
-        print("Bluetooth error code: \(errorCode)")
-        
         switch errorCode {
         case CBError.Code.connectionTimeout.rawValue:
-            print("Connection timeout - device may be out of range or turned off")
+            // Connection timeout - device may be out of range or turned off
+            break
         case CBError.Code.connectionFailed.rawValue:
-            print("Connection failed - device may be busy or unavailable")
+            // Connection failed - device may be busy or unavailable
+            break
         case CBError.Code.peripheralDisconnected.rawValue:
-            print("Peripheral disconnected - connection lost")
+            // Peripheral disconnected - connection lost
+            break
         default:
-            print("Unknown Bluetooth error")
+            // Unknown Bluetooth error
+            break
         }
     }
     
@@ -1672,18 +1240,14 @@ class StatusBarManager {
     internal func updateStatusItems(devices: [BluetoothDevice]) {
         // 确保在主队列中执行
         DispatchQueue.main.async {
-            let timestamp = localTimeString()
-            print("[\(timestamp)] === 更新状态栏图标 ===")
-            print("[\(timestamp)] 当前设备数量: \(devices.count)")
-            print("[\(timestamp)] 当前状态栏图标数量: \(self.statusItems.count)")
-            print("[\(timestamp)] 当前设备状态栏图标数量: \(self.deviceStatusItems.count)")
+
             
             // 保留应用图标，只处理设备图标
             var appStatusItem: NSStatusItem?
             if !self.statusItems.isEmpty {
                 // 保存第一个状态项（应用图标）
                 appStatusItem = self.statusItems.first
-                print("[\(timestamp)] 应用图标已存在")
+
             }
             
             // 如果没有应用图标，创建一个
@@ -1695,21 +1259,21 @@ class StatusBarManager {
                         // 确保自定义图标不使用模板模式，保持原始白色
                         customImage.isTemplate = false
                         button.image = customImage
-                        print("[\(timestamp)] 使用自定义应用图标")
+
                     } else {
                         // 如果自定义图标不可用，使用系统图标
                         if let image = NSImage(systemSymbolName: "bluetooth", accessibilityDescription: "Bluetooth") {
                             // 确保系统图标不使用模板模式，保持原始白色
                             image.isTemplate = false
                             button.image = image
-                            print("[\(timestamp)] 使用系统应用图标")
+
                         } else {
                             // 如果系统图标也不可用，使用随机图标
                             let randomIcon = self.generateRandomIcon()
                             // 确保随机图标不使用模板模式，保持原始颜色
                             randomIcon.isTemplate = false
                             button.image = randomIcon
-                            print("[\(timestamp)] 使用随机应用图标")
+
                         }
                     }
                     button.action = #selector(self.showDeviceMenu)
@@ -1717,7 +1281,7 @@ class StatusBarManager {
                     button.toolTip = "BtBar - Bluetooth Device Manager"
                 }
                 self.statusItems.append(appStatusItem!)
-                print("[\(timestamp)] 创建新的应用图标")
+
             }
             
             // 收集当前需要显示的设备
@@ -1725,39 +1289,34 @@ class StatusBarManager {
             for device in devices {
                 // 检查条件：设备已连接 + 配置了显示图标
                 let shouldShowIcon = device.isConnected && (self.showDeviceIcons[device.id] ?? true)
-                print("[\(timestamp)] 设备: \(device.name), 已连接: \(device.isConnected), 显示图标: \(shouldShowIcon), ID: \(device.id)")
                 if shouldShowIcon {
                     devicesToShow.append(device)
-                    print("[\(timestamp)] 添加到显示列表: \(device.name), ID: \(device.id)")
                 }
             }
-            print("[\(timestamp)] 需要显示的设备数量: \(devicesToShow.count)")
-            print("[\(timestamp)] Total devices: \(devices.count), Connected devices: \(devices.filter { $0.isConnected }.count)")
+
             
             // 移除不再需要显示的设备图标
             var devicesToRemove: [String] = []
             for (deviceID, deviceInfo) in self.deviceStatusItems {
                 if !devicesToShow.contains(where: { $0.id == deviceID }) {
                     devicesToRemove.append(deviceID)
-                    print("[\(timestamp)] 移除设备图标: \(deviceID)")
                     // 从状态栏中移除
                     deviceInfo.statusItem.button?.removeFromSuperview()
                     // 从statusItems中移除
                     if let index = self.statusItems.firstIndex(where: { $0 == deviceInfo.statusItem }) {
                         self.statusItems.remove(at: index)
-                        print("[\(timestamp)] 从statusItems中移除索引: \(index)")
                     }
                 }
             }
             for deviceID in devicesToRemove {
                 self.deviceStatusItems.removeValue(forKey: deviceID)
                 self.lastDeviceStates.removeValue(forKey: deviceID)
-                print("[\(timestamp)] 移除设备图标映射: \(deviceID)")
+
             }
             
             // 更新或添加需要显示的设备图标
             for device in devicesToShow {
-                print("[\(timestamp)] 处理设备: \(device.name), ID: \(device.id)")
+
                 
                 // 检查设备状态是否发生变化
                 let currentState = (isConnected: device.isConnected, customIconName: device.customIconName, batteryLevel: device.batteryLevel, caseBatteryLevel: device.caseBatteryLevel, leftBatteryLevel: device.leftBatteryLevel, rightBatteryLevel: device.rightBatteryLevel)
@@ -1770,26 +1329,21 @@ class StatusBarManager {
                 
                 // 如果设备状态没有变化，跳过更新
                 if let lastState = lastState, lastState == currentState {
-                    print("[\(timestamp)] 设备状态未变化，跳过更新: \(device.name)")
                     continue
                 }
                 
                 // 更新设备状态
                 self.lastDeviceStates[device.id] = currentState
-                print("[\(timestamp)] 更新设备状态: \(device.name), 自定义图标: \(device.customIconName ?? "无")")
-                print("[\(timestamp)] 设备连接状态变化: 之前=\(wasDisconnected ? "断开" : "连接"), 现在=\(isNowConnected ? "连接" : "断开"), 刚刚连接=\(justConnected)")
                 
                 // 获取或创建状态栏图标
                 let deviceStatusItem: NSStatusItem
                 if let existingItem = self.deviceStatusItems[device.id] {
                     // 使用现有的状态栏图标
                     deviceStatusItem = existingItem.statusItem
-                    print("[\(timestamp)] 使用现有状态栏图标: \(device.name)")
                 } else {
                     // 创建一个新的状态栏图标
                     deviceStatusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
                     self.statusItems.append(deviceStatusItem)
-                    print("[\(timestamp)] 创建新的状态栏图标: \(device.name)")
                 }
                 
                 if let button = deviceStatusItem.button {
@@ -1801,14 +1355,12 @@ class StatusBarManager {
                         button.image = deviceIcon
                         // 确保图片显示模式正确
                         button.imageScaling = .scaleProportionallyUpOrDown
-                        print("[\(timestamp)] 在状态栏显示设备图标: \(device.name)")
                     } else {
                         // 如果所有图标都不可用，使用随机图标
                         let randomIcon = self.generateRandomIcon()
                         // 使用模板模式让系统根据主题自动调整颜色
                         randomIcon.isTemplate = true
                         button.image = randomIcon
-                        print("[\(timestamp)] 使用随机图标为设备: \(device.name)")
                     }
                     
                     // 为设备图标设置不同的action，点击时显示设备详情信息
@@ -1820,7 +1372,6 @@ class StatusBarManager {
                     button.toolTip = device.name
                     // 确保按钮可见
                     button.isHidden = false
-                    print("[\(timestamp)] 更新状态栏图标完成: \(device.name)")
                 }
                 
                 // 更新设备状态栏图标映射，存储设备信息和气泡
@@ -1828,7 +1379,6 @@ class StatusBarManager {
                 
                 // 如果设备刚刚连接，自动弹出气泡详情
                 if justConnected {
-                    print("[\(timestamp)] 设备刚刚连接，自动弹出气泡详情: \(device.name)")
                     // 延迟一点时间，确保图标已经完全创建
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                         // 模拟点击状态栏图标，触发气泡显示，并设置5秒后自动关闭
@@ -1839,12 +1389,8 @@ class StatusBarManager {
                     self.switchToDefaultAudioDevice(device, showAlert: false)
                 }
             }
-            print("[\(timestamp)] 状态栏图标更新完成，当前状态栏图标数量: \(self.statusItems.count)")
-            print("[\(timestamp)] =====================")
-            
             // 清除菜单缓存，确保下次打开菜单时显示最新的设备状态
             self.cachedMenu = nil
-            print("[\(timestamp)] Menu cache cleared due to device status changes")
         }
     }
     
@@ -1913,8 +1459,6 @@ class StatusBarManager {
                     return configuredImage
                 }
                 return image
-            } else {
-                print("无法找到系统符号: \(customIconName)")
             }
         }
         
@@ -2011,17 +1555,13 @@ class StatusBarManager {
         // 移除缓存，每次都创建新菜单
         cachedMenu = nil
         
-        // 首先同步获取最新的设备状态，然后再创建菜单
-        print("[\(localTimeString())] showDeviceMenu - Started, refreshing device status...")
-        
         // 预先获取system_profiler数据并缓存，避免多个设备重复调用
-        print("Preloading system_profiler data for menu...")
-        getCachedSystemProfilerData()
+        _ = getCachedSystemProfilerData()
         
         // 直接使用IOBluetoothDevice的isConnected()方法来检查设备的实时连接状态
         // 这样可以确保获取到最新的设备连接状态，而不依赖于bluetoothManager.devices中的缓存状态
         if let devicesArray = IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice] {
-            print("[\(localTimeString())] Found \(devicesArray.count) paired devices")
+
             
             // 创建新菜单
             let menu = NSMenu()
@@ -2112,13 +1652,7 @@ class StatusBarManager {
                 }
             }
             
-            print("[\(localTimeString())] Menu creation - Connected devices: \(connectedDevices.count), Disconnected devices: \(disconnectedDevices.count)")
-            for device in connectedDevices {
-                print("[\(localTimeString())] Connected device: \(device.name), ID: \(device.id)")
-            }
-            for device in disconnectedDevices {
-                print("[\(localTimeString())] Disconnected device: \(device.name), ID: \(device.id)")
-            }
+
             
             // 先添加已连接的设备
             if !connectedDevices.isEmpty {
@@ -2210,10 +1744,9 @@ class StatusBarManager {
             // 同时更新bluetoothManager.devices，确保其他地方也能获取到最新的设备状态
             bluetoothManager.retrieveConnectedDevices()
             
-            print("[\(localTimeString())] showDeviceMenu - Completed")
+
         } else {
             // 没有配对设备时
-            print("[\(localTimeString())] No paired devices found")
             
             // 创建新菜单
             let menu = NSMenu()
@@ -2292,7 +1825,7 @@ class StatusBarManager {
             // 同时更新bluetoothManager.devices，确保其他地方也能获取到最新的设备状态
             bluetoothManager.retrieveConnectedDevices()
             
-            print("[\(localTimeString())] showDeviceMenu - Completed")
+
         }
     }
     
@@ -2809,7 +2342,6 @@ class StatusBarManager {
             showDeviceIcons[device.id] = !currentValue
             updateStatusItems(devices: bluetoothManager.devices)
             saveDeviceDisplaySettings()
-            print("\(showDeviceIcons[device.id] ?? true ? "Show" : "Hide") status bar icon for device \(device.name)")
         }
     }
     
@@ -2889,7 +2421,6 @@ class StatusBarManager {
                     if !newName.isEmpty && newName != device.name {
                         // 更新设备名称
                         bluetoothManager.updateDeviceName(device, newName: newName)
-                        print("Device renamed: \(device.name) -> \(newName)")
                     }
                 }
             } else {
@@ -2901,7 +2432,6 @@ class StatusBarManager {
                     if !newName.isEmpty && newName != device.name {
                         // 更新设备名称
                         bluetoothManager.updateDeviceName(device, newName: newName)
-                        print("Device renamed: \(device.name) -> \(newName)")
                     }
                 }
             }
@@ -2912,7 +2442,7 @@ class StatusBarManager {
     
     @objc private func showDeviceDetails(_ sender: AnyObject) {
         // 确保system_profiler数据已缓存，避免点击时重复调用
-        getCachedSystemProfilerData()
+        _ = getCachedSystemProfilerData()
         
         // 找出是哪个设备的图标被点击了
         for (_, deviceInfo) in deviceStatusItems {
@@ -2947,58 +2477,35 @@ class StatusBarManager {
     private func switchToDefaultAudioDevice(_ device: BluetoothDevice, showAlert: Bool = false) {
         // 在后台线程中执行音频设备切换，避免阻塞UI线程
         DispatchQueue.global(qos: .background).async {
-            let timestamp = localTimeString()
-            print("[\(timestamp)] 尝试设置默认音频设备为: \(device.name)")
-            
             // 延迟1秒，确保音频设备完全初始化
-            print("[\(timestamp)] 等待1秒，确保音频设备完全初始化...")
             usleep(1000000) // 1000ms
             
-            // 打印当前所有可用的音频设备
+            // 获取所有可用的音频设备
             let allAudioDevices = getAudioDevices()
-            print("[\(timestamp)] 可用音频设备列表:")
-            for audioDevice in allAudioDevices {
-                print("[\(timestamp)]   - \(audioDevice.name) (ID: \(audioDevice.id))")
-            }
-            
-            // 获取切换前的默认音频设备
-            if let beforeDevice = getCurrentDefaultAudioDevice() {
-                print("[\(timestamp)] 切换前默认音频设备: \(beforeDevice.name) (ID: \(beforeDevice.id))")
-            }
             
             // 收集所有匹配的音频设备
             let lowerDeviceName = device.name.lowercased()
             let matchingDevices = allAudioDevices.filter { $0.name.lowercased().contains(lowerDeviceName) }
-            print("[\(timestamp)] 找到 \(matchingDevices.count) 个匹配的音频设备")
             
             var success = false
             var targetDeviceName = ""
             
             // 尝试切换到每个匹配的设备
-            for (index, audioDevice) in matchingDevices.enumerated() {
-                print("[\(timestamp)] 尝试切换到匹配设备 \(index + 1)/\(matchingDevices.count): \(audioDevice.name) (ID: \(audioDevice.id))")
-                
+            for audioDevice in matchingDevices {
                 // 尝试切换默认音频设备
                 let switchSuccess = setDefaultAudioDevice(audioDevice.id)
-                print("[\(timestamp)] 切换默认音频设备结果: \(switchSuccess ? "成功" : "失败")")
                 
                 // 再次获取当前默认音频设备，确认切换是否成功
                 if switchSuccess {
                     // 等待1秒，让系统完成切换
                     usleep(1000000) // 1000ms
                     
-                    print("[\(timestamp)] 切换后验证默认音频设备...")
                     if let afterDevice = getCurrentDefaultAudioDevice() {
-                        print("[\(timestamp)] 切换后默认音频设备: \(afterDevice.name) (ID: \(afterDevice.id))")
                         if afterDevice.id == audioDevice.id {
-                            print("[\(timestamp)] ✅ 音频设备切换成功!")
                             success = true
                             targetDeviceName = audioDevice.name
                             // 切换成功，退出循环
                             break
-                        } else {
-                            print("[\(timestamp)] ❌ 音频设备切换失败，当前默认设备与目标设备不匹配")
-                            // 继续尝试下一个设备
                         }
                     }
                 }
@@ -3014,8 +2521,6 @@ class StatusBarManager {
                     }
                 }
             }
-            
-            print("[\(timestamp)] 音频设备切换流程完成")
         }
     }
     
@@ -3151,7 +2656,6 @@ class StatusBarManager {
                                     earImage.isTemplate = true
                                     leftEarIcon.image = earImage
                                     foundLeftIcon = true
-                                    print("使用AirPods左耳图标: \(iconName)")
                                     break
                                 }
                             }
@@ -3161,7 +2665,6 @@ class StatusBarManager {
                                 if let earImage = NSImage(systemSymbolName: "headphones", accessibilityDescription: "Headphones") {
                                     earImage.isTemplate = true
                                     leftEarIcon.image = earImage
-                                    print("使用通用耳机图标")
                                 }
                             }
                             batteryView.addSubview(leftEarIcon)
@@ -3188,7 +2691,6 @@ class StatusBarManager {
                                     earImage.isTemplate = true
                                     rightEarIcon.image = earImage
                                     foundRightIcon = true
-                                    print("使用AirPods右耳图标: \(iconName)")
                                     break
                                 }
                             }
@@ -3198,7 +2700,6 @@ class StatusBarManager {
                                 if let earImage = NSImage(systemSymbolName: "headphones", accessibilityDescription: "Headphones") {
                                     earImage.isTemplate = true
                                     rightEarIcon.image = earImage
-                                    print("使用通用耳机图标")
                                 }
                             }
                             batteryView.addSubview(rightEarIcon)
@@ -3226,7 +2727,6 @@ class StatusBarManager {
                                     caseImage.isTemplate = true
                                     caseIcon.image = caseImage
                                     foundCaseIcon = true
-                                    print("使用AirPods充电盒图标: \(iconName)")
                                     break
                                 }
                             }
@@ -3236,7 +2736,6 @@ class StatusBarManager {
                                 if let caseImage = NSImage(systemSymbolName: "case.fill", accessibilityDescription: "Case") {
                                     caseImage.isTemplate = true
                                     caseIcon.image = caseImage
-                                    print("使用通用盒子图标")
                                 }
                             }
                             batteryView.addSubview(caseIcon)
@@ -3967,7 +3466,7 @@ func getCachedSystemProfilerData() -> [String: Any]? {
     // 检查缓存是否存在且未过期
     if let (cachedData, timestamp) = systemProfilerCache {
         if Date().timeIntervalSince(timestamp) < cacheExpirationInterval {
-            print("[\(localTimeString())] 使用缓存的system_profiler数据")
+            // print("[\(localTimeString())] 使用缓存的system_profiler数据")
             return cachedData
         }
     }
