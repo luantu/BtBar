@@ -708,6 +708,15 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
                     deviceID = deviceName
                 }
                 
+                // 优先使用从system_profiler获取的设备名称
+                var finalDeviceName = deviceName
+                if !addressString.isEmpty {
+                    if let systemName = getSystemDeviceName(for: addressString) {
+                        finalDeviceName = systemName
+                        print("  Using system profiler name: \(systemName)")
+                    }
+                }
+                
                 pairedDeviceIDs.insert(deviceID)
                 
                 // 从持久化存储中读取设备的自定义图标路径
@@ -716,7 +725,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
                 
                 // 检查设备是否已连接
                 let isConnected = bluetoothDevice.isConnected()
-                print("Device \(index + 1): \(deviceName)")
+                print("Device \(index + 1): \(finalDeviceName)")
                 print("  Address: \(addressString)")
                 print("  Is connected: \(isConnected)")
                 print("  Custom icon: \(customIconName ?? "nil")")
@@ -732,7 +741,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
                     // 尝试获取真实电量
                     let tempDevice = BluetoothDevice(
                         id: deviceID,
-                        name: deviceName,
+                        name: finalDeviceName,
                         macAddress: addressString.isEmpty ? deviceID : addressString,
                         isConnected: isConnected,
                         batteryLevel: nil,
@@ -770,11 +779,11 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
                 }
                 
                 // 获取设备的默认图标名称
-                let defaultIconName = self.getDeviceIconName(name: deviceName)
+                let defaultIconName = self.getDeviceIconName(name: finalDeviceName)
                 
                 let device = BluetoothDevice(
                     id: deviceID,
-                    name: deviceName,
+                    name: finalDeviceName,
                     macAddress: addressString.isEmpty ? deviceID : addressString,
                     isConnected: isConnected,
                     batteryLevel: batteryLevel,
@@ -1846,59 +1855,8 @@ class StatusBarManager {
                         self.showDeviceDetailsForDevice(device, autoClose: true)
                     }
                     
-                    // 尝试将系统默认声音设备切换为当前连接的蓝牙设备
-                    print("[\(timestamp)] 尝试切换系统默认声音设备为: \(device.name)")
-                    
-                    // 延迟2秒，确保音频设备完全初始化
-                    print("[\(timestamp)] 等待2秒，确保音频设备完全初始化...")
-                    usleep(2000000) // 2000ms
-                    
-                    // 打印当前所有可用的音频设备
-                    let allAudioDevices = getAudioDevices()
-                    print("[\(timestamp)] 可用音频设备列表:")
-                    for audioDevice in allAudioDevices {
-                        print("[\(timestamp)]   - \(audioDevice.name) (ID: \(audioDevice.id))")
-                    }
-                    
-                    // 获取切换前的默认音频设备
-                    if let beforeDevice = getCurrentDefaultAudioDevice() {
-                        print("[\(timestamp)] 切换前默认音频设备: \(beforeDevice.name) (ID: \(beforeDevice.id))")
-                    }
-                    
-                    // 收集所有匹配的音频设备
-                    let lowerDeviceName = device.name.lowercased()
-                    let matchingDevices = allAudioDevices.filter { $0.name.lowercased().contains(lowerDeviceName) }
-                    print("[\(timestamp)] 找到 \(matchingDevices.count) 个匹配的音频设备")
-                    
-                    // 尝试切换到每个匹配的设备
-                    for (index, audioDevice) in matchingDevices.enumerated() {
-                        print("[\(timestamp)] 尝试切换到匹配设备 \(index + 1)/\(matchingDevices.count): \(audioDevice.name) (ID: \(audioDevice.id))")
-                        
-                        // 尝试切换默认音频设备
-                        let success = setDefaultAudioDevice(audioDevice.id)
-                        print("[\(timestamp)] 切换默认音频设备结果: \(success ? "成功" : "失败")")
-                        
-                        // 再次获取当前默认音频设备，确认切换是否成功
-                        if success {
-                            // 等待1秒，让系统完成切换
-                            usleep(1000000) // 1000ms
-                            
-                            print("[\(timestamp)] 切换后验证默认音频设备...")
-                            if let afterDevice = getCurrentDefaultAudioDevice() {
-                                print("[\(timestamp)] 切换后默认音频设备: \(afterDevice.name) (ID: \(afterDevice.id))")
-                                if afterDevice.id == audioDevice.id {
-                                    print("[\(timestamp)] ✅ 音频设备切换成功!")
-                                    // 切换成功，退出循环
-                                    break
-                                } else {
-                                    print("[\(timestamp)] ❌ 音频设备切换失败，当前默认设备与目标设备不匹配")
-                                    // 继续尝试下一个设备
-                                }
-                            }
-                        }
-                    }
-                    
-                    print("[\(timestamp)] 音频设备切换流程完成")
+                    // 调用统一的音频设备切换方法，不显示操作结果
+                    self.switchToDefaultAudioDevice(device, showAlert: false)
                 }
             }
             print("[\(timestamp)] 状态栏图标更新完成，当前状态栏图标数量: \(self.statusItems.count)")
@@ -2143,16 +2101,24 @@ class StatusBarManager {
                     batteryLevel = batteryLevels.generalLevel ?? batteryLevels.leftLevel
                 }
                 
+                // 优先使用从system_profiler获取的设备名称
+                var finalDeviceName = deviceName
+                let deviceAddress = addressString.isEmpty ? deviceID : addressString
+                if let systemName = getSystemDeviceName(for: deviceAddress) {
+                    finalDeviceName = systemName
+                    print("Using system profiler device name: \(systemName) for address: \(deviceAddress)")
+                }
+                
                 let device = BluetoothDevice(
                     id: deviceID,
-                    name: deviceName,
-                    macAddress: addressString.isEmpty ? deviceID : addressString,
+                    name: finalDeviceName,
+                    macAddress: deviceAddress,
                     isConnected: isConnected,
                     batteryLevel: batteryLevel,
                     caseBatteryLevel: caseBatteryLevel,
                     leftBatteryLevel: leftBatteryLevel,
                     rightBatteryLevel: rightBatteryLevel,
-                    defaultIconName: getDeviceIconName(for: deviceName),
+                    defaultIconName: getDeviceIconName(for: finalDeviceName),
                     customIconName: customIconName
                 )
                 
@@ -2600,6 +2566,14 @@ class StatusBarManager {
         showStatusIconItem.representedObject = device
         submenu.addItem(showStatusIconItem)
         
+        // 设置为默认音频设备
+        if device.isConnected {
+            let audioDeviceItem = NSMenuItem(title: "Set as Default Audio Device", action: #selector(setDefaultAudioDeviceForMenuItem(_:)), keyEquivalent: "")
+            audioDeviceItem.target = self
+            audioDeviceItem.representedObject = device
+            submenu.addItem(audioDeviceItem)
+        }
+        
         // 电量信息
         if let batteryLevel = device.batteryLevel {
             let batteryItem = NSMenuItem(title: "Battery: \(batteryLevel)%", action: nil, keyEquivalent: "")
@@ -2953,9 +2927,6 @@ class StatusBarManager {
 
     
     @objc private func showDeviceDetails(_ sender: AnyObject) {
-        // 显示设备详情信息
-        print("显示设备详情信息")
-        
         // 找出是哪个设备的图标被点击了
         for (_, deviceInfo) in deviceStatusItems {
             if let button = deviceInfo.statusItem.button, button === sender {
@@ -2966,18 +2937,92 @@ class StatusBarManager {
         }
     }
     
+    @objc private func setDefaultAudioDeviceForMenuItem(_ sender: NSMenuItem) {
+        if let device = sender.representedObject as? BluetoothDevice {
+            // 确保应用程序处于活动状态
+            NSApp.activate(ignoringOtherApps: true)
+            // 调用统一的音频设备切换方法，显示操作结果
+            switchToDefaultAudioDevice(device, showAlert: true)
+        }
+    }
+    
+    // 统一的音频设备切换方法
+    private func switchToDefaultAudioDevice(_ device: BluetoothDevice, showAlert: Bool = false) {
+        // 在后台线程中执行音频设备切换，避免阻塞UI线程
+        DispatchQueue.global(qos: .background).async {
+            let timestamp = localTimeString()
+            print("[\(timestamp)] 尝试设置默认音频设备为: \(device.name)")
+            
+            // 延迟1秒，确保音频设备完全初始化
+            print("[\(timestamp)] 等待1秒，确保音频设备完全初始化...")
+            usleep(1000000) // 1000ms
+            
+            // 打印当前所有可用的音频设备
+            let allAudioDevices = getAudioDevices()
+            print("[\(timestamp)] 可用音频设备列表:")
+            for audioDevice in allAudioDevices {
+                print("[\(timestamp)]   - \(audioDevice.name) (ID: \(audioDevice.id))")
+            }
+            
+            // 获取切换前的默认音频设备
+            if let beforeDevice = getCurrentDefaultAudioDevice() {
+                print("[\(timestamp)] 切换前默认音频设备: \(beforeDevice.name) (ID: \(beforeDevice.id))")
+            }
+            
+            // 收集所有匹配的音频设备
+            let lowerDeviceName = device.name.lowercased()
+            let matchingDevices = allAudioDevices.filter { $0.name.lowercased().contains(lowerDeviceName) }
+            print("[\(timestamp)] 找到 \(matchingDevices.count) 个匹配的音频设备")
+            
+            var success = false
+            var targetDeviceName = ""
+            
+            // 尝试切换到每个匹配的设备
+            for (index, audioDevice) in matchingDevices.enumerated() {
+                print("[\(timestamp)] 尝试切换到匹配设备 \(index + 1)/\(matchingDevices.count): \(audioDevice.name) (ID: \(audioDevice.id))")
+                
+                // 尝试切换默认音频设备
+                let switchSuccess = setDefaultAudioDevice(audioDevice.id)
+                print("[\(timestamp)] 切换默认音频设备结果: \(switchSuccess ? "成功" : "失败")")
+                
+                // 再次获取当前默认音频设备，确认切换是否成功
+                if switchSuccess {
+                    // 等待1秒，让系统完成切换
+                    usleep(1000000) // 1000ms
+                    
+                    print("[\(timestamp)] 切换后验证默认音频设备...")
+                    if let afterDevice = getCurrentDefaultAudioDevice() {
+                        print("[\(timestamp)] 切换后默认音频设备: \(afterDevice.name) (ID: \(afterDevice.id))")
+                        if afterDevice.id == audioDevice.id {
+                            print("[\(timestamp)] ✅ 音频设备切换成功!")
+                            success = true
+                            targetDeviceName = audioDevice.name
+                            // 切换成功，退出循环
+                            break
+                        } else {
+                            print("[\(timestamp)] ❌ 音频设备切换失败，当前默认设备与目标设备不匹配")
+                            // 继续尝试下一个设备
+                        }
+                    }
+                }
+            }
+            
+            // 在主线程中显示结果（如果需要）
+            if showAlert {
+                DispatchQueue.main.async {
+                    if success {
+                        self.showSuccessAlert(title: "Success", message: "Default audio device set to \(targetDeviceName)")
+                    } else {
+                        self.showErrorAlert(title: "Error", message: "Failed to set default audio device. Please try again.")
+                    }
+                }
+            }
+            
+            print("[\(timestamp)] 音频设备切换流程完成")
+        }
+    }
+    
     internal func showDeviceDetailsForDevice(_ device: BluetoothDevice, autoClose: Bool = false) {
-        // 显示设备详情信息
-        print("显示设备详情信息: \(device.name)")
-        print("已连接: \(device.isConnected)")
-        print("电量: \(device.batteryLevel != nil ? "\(device.batteryLevel!)%" : "-")")
-        print("盒子电量: \(device.caseBatteryLevel != nil ? "\(device.caseBatteryLevel!)%" : "-")")
-        print("左耳电量: \(device.leftBatteryLevel != nil ? "\(device.leftBatteryLevel!)%" : "-")")
-        print("右耳电量: \(device.rightBatteryLevel != nil ? "\(device.rightBatteryLevel!)%" : "-")")
-        print("是否苹果设备: \(device.isAppleDevice)")
-        print("自定义图标: \(device.customIconName ?? "无")")
-        print("自动关闭: \(autoClose)")
-        
         // 确保应用程序处于活动状态
         NSApp.activate(ignoringOtherApps: true)
         
@@ -2994,7 +3039,7 @@ class StatusBarManager {
                     let popover = NSPopover()
                     popover.behavior = .transient // 点击外部时自动关闭
                     // 统一气泡大小，因为电量显示布局已统一
-                    let popoverHeight = 140.0
+                    let popoverHeight = 140.0 
                     popover.contentSize = NSSize(width: 220, height: popoverHeight) // 调整尺寸以适应电池图标
                     popover.animates = true // 添加动画效果
                     // 确保气泡显示到最上层
@@ -3037,8 +3082,20 @@ class StatusBarManager {
                         // 计算电量值
                         var batteryLevel: Int = 0
                         if device.isAppleDevice {
-                            // 苹果设备使用左耳电量作为主要电量
-                            batteryLevel = device.leftBatteryLevel ?? 0 
+                            // 苹果设备的电量计算逻辑
+                            if let leftLevel = device.leftBatteryLevel, let rightLevel = device.rightBatteryLevel {
+                                // 左右耳都有，使用平均值
+                                batteryLevel = (leftLevel + rightLevel) / 2
+                            } else if let leftLevel = device.leftBatteryLevel {
+                                // 只有左耳，使用左耳电量
+                                batteryLevel = leftLevel
+                            } else if let rightLevel = device.rightBatteryLevel {
+                                // 只有右耳，使用右耳电量
+                                batteryLevel = rightLevel
+                            } else {
+                                // 没有电量信息
+                                batteryLevel = 0
+                            }
                         } else {
                             // 非苹果设备使用通用电量
                             batteryLevel = device.batteryLevel ?? 0
@@ -3051,7 +3108,7 @@ class StatusBarManager {
                     }
                     
                     ////////////////////// 添加设备名称
-                    let nameLabel = NSTextField(frame: NSRect(x: 52, y: 99, width: 194, height: 18)) // 调整位置和大小，整体向上移动
+                    let nameLabel = NSTextField(frame: NSRect(x: 46, y: 99, width: 194, height: 18)) // 调整位置和大小，整体向上移动
                     nameLabel.stringValue = device.name
                     nameLabel.isBezeled = false
                     nameLabel.isEditable = false
@@ -3061,7 +3118,7 @@ class StatusBarManager {
                     visualEffectView.addSubview(nameLabel)
                     
                     /////////////////// 添加连接状态
-                    let statusLabel = NSTextField(frame: NSRect(x: 12, y: 71, width: 236, height: 16)) // 调整位置和大小，整体向上移动
+                    let statusLabel = NSTextField(frame: NSRect(x: 12, y: 69, width: 236, height: 16)) // 调整位置和大小，整体向上移动
                     statusLabel.stringValue = "连接状态: \(device.isConnected ? "已连接" : "未连接")"
                     statusLabel.isBezeled = false
                     statusLabel.isEditable = false
@@ -3070,7 +3127,7 @@ class StatusBarManager {
                     visualEffectView.addSubview(statusLabel)
                     
                     ////////////////////// 添加电量信息和电池图标
-                    let batteryView = NSView(frame: NSRect(x: 12, y: 44, width: 236, height: 20)) // 统一位置和大小
+                    let batteryView = NSView(frame: NSRect(x: 12, y: 38, width: 236, height: 20)) // 统一位置和大小
                     
                     // 添加电量标签
                     let batteryLabel = NSTextField(frame: NSRect(x: 0, y: 0, width: 35, height: 20))
@@ -3162,7 +3219,7 @@ class StatusBarManager {
                         // 盒子电量
                         if let caseLevel = device.caseBatteryLevel {
                             // 盒子图标 - 使用AirPods 3充电盒图标
-                            let caseIcon = NSImageView(frame: NSRect(x: currentX, y: 4, width: 16, height: 16))
+                            let caseIcon = NSImageView(frame: NSRect(x: currentX, y: 5, width: 16, height: 16))
                             // 尝试使用AirPods 3充电盒图标
                             let caseIconNames = ["airpods.gen3.chargingcase.wireless.fill", "airpods.case", "case.fill"]
                             var foundCaseIcon = false
@@ -3218,7 +3275,7 @@ class StatusBarManager {
                     visualEffectView.addSubview(batteryView)
                     
                     ////////////////////////// 添加MAC地址
-                    let macLabel = NSTextField(frame: NSRect(x: 12, y: 23, width: 236, height: 16)) // 调整位置，消除空行
+                    let macLabel = NSTextField(frame: NSRect(x: 12, y: 15, width: 236, height: 16)) // 调整位置，消除空行
                     macLabel.stringValue = "MAC地址: \(device.macAddress)"
                     macLabel.isBezeled = false
                     macLabel.isEditable = false
@@ -3902,4 +3959,125 @@ struct IconDisplaySettingsView: View {
         // 通知 StatusBarManager 重新加载设置
         NotificationCenter.default.post(name: NSNotification.Name("DeviceDisplaySettingsChanged"), object: nil)
     }
+}
+
+// 从system_profiler获取蓝牙设备信息
+func getBluetoothDevicesFromSystemProfiler() -> [String: String] {
+    let task = Process()
+    task.launchPath = "/usr/sbin/system_profiler"
+    task.arguments = ["SPBluetoothDataType", "-json"]
+    
+    let pipe = Pipe()
+    task.standardOutput = pipe
+    
+    do {
+        try task.run()
+        task.waitUntilExit()
+        
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        if let jsonString = String(data: data, encoding: .utf8) {
+            // 解析JSON获取设备信息
+            if let data = jsonString.data(using: .utf8) {
+                do {
+                    if let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+                       let bluetoothData = json["SPBluetoothDataType"] as? [[String: Any]] {
+                        var deviceMap: [String: String] = [:]
+                        
+                        for item in bluetoothData {
+                            // 处理已连接设备
+                            if let connectedDevices = item["device_connected"] as? [[String: Any]] {
+                                for deviceDict in connectedDevices {
+                                    for (name, deviceInfo) in deviceDict {
+                                        if let info = deviceInfo as? [String: Any],
+                                           let address = info["device_address"] as? String {
+                                            // 将地址格式化为统一格式（移除冒号并转换为大写）
+                                            let formattedAddress = address.replacingOccurrences(of: ":", with: "").uppercased()
+                                            deviceMap[formattedAddress] = name
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // 处理未连接设备
+                            if let disconnectedDevices = item["device_not_connected"] as? [[String: Any]] {
+                                for deviceDict in disconnectedDevices {
+                                    for (name, deviceInfo) in deviceDict {
+                                        if let info = deviceInfo as? [String: Any],
+                                           let address = info["device_address"] as? String {
+                                            // 将地址格式化为统一格式（移除冒号并转换为大写）
+                                            let formattedAddress = address.replacingOccurrences(of: ":", with: "").uppercased()
+                                            deviceMap[formattedAddress] = name
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        return deviceMap
+                    }
+                } catch {
+                    print("Error parsing system_profiler JSON: \(error)")
+                }
+            }
+        }
+    } catch {
+        print("Error running system_profiler: \(error)")
+    }
+    
+    return [:]
+}
+
+// 获取设备的系统名称（从system_profiler获取）
+func getSystemDeviceName(for address: String) -> String? {
+    let bluetoothDevices = getBluetoothDevicesFromSystemProfiler()
+    
+    // 尝试直接查找
+    if let name = bluetoothDevices[address] {
+        return name
+    }
+    
+    // 尝试不同格式的地址
+    // 移除所有分隔符（冒号或连字符）并转换为大写
+    let cleanAddress = address.replacingOccurrences(of: ":", with: "").replacingOccurrences(of: "-", with: "").uppercased()
+    if let name = bluetoothDevices[cleanAddress] {
+        return name
+    }
+    
+    // 尝试添加冒号的格式
+    let addressWithColons = addColonsToAddress(cleanAddress)
+    if let name = bluetoothDevices[addressWithColons] {
+        return name
+    }
+    
+    // 尝试添加连字符的格式
+    let addressWithHyphens = addHyphensToAddress(cleanAddress)
+    if let name = bluetoothDevices[addressWithHyphens] {
+        return name
+    }
+    
+    return nil
+}
+
+// 为蓝牙地址添加连字符格式
+func addHyphensToAddress(_ address: String) -> String {
+    var result = ""
+    for (index, char) in address.enumerated() {
+        if index > 0 && index % 2 == 0 {
+            result += "-"
+        }
+        result += String(char)
+    }
+    return result
+}
+
+// 为蓝牙地址添加冒号格式
+func addColonsToAddress(_ address: String) -> String {
+    var result = ""
+    for (index, char) in address.enumerated() {
+        if index > 0 && index % 2 == 0 {
+            result += ":"
+        }
+        result += String(char)
+    }
+    return result
 }
