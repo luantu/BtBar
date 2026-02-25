@@ -406,9 +406,6 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
     }
     
     public func retrieveConnectedDevices(completion: (() -> Void)? = nil) {
-        // 预先获取system_profiler数据并缓存，避免多个设备重复调用
-        _ = getCachedSystemProfilerData()
-        
         // 方法1: 使用IOBluetooth框架获取已配对的设备
         if let devicesArray = IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice] {
             // 保存已配对设备的ID，用于后续过滤
@@ -454,6 +451,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
                 var leftBatteryLevel: Int? = nil
                 var rightBatteryLevel: Int? = nil
                 
+                // 只有已连接的设备才尝试获取电量信息
                 if isConnected {
                     // 尝试获取真实电量
                     let tempDevice = BluetoothDevice(
@@ -506,22 +504,20 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
                 // 更新设备列表
                 self.devices = newDevices
                 
-                // 发送设备列表更新通知，确保状态栏和菜单立即更新
+                // 立即触发StatusBarManager的updateStatusItems方法，确保状态栏图标立即更新
+                let appDelegate = NSApplication.shared.delegate as? AppDelegate
+                let statusBarManager = appDelegate?.statusBarManager
+                
+                if let statusBarManager = statusBarManager {
+                    statusBarManager.updateStatusItems(devices: self.devices)
+                }
+                
+                // 发送设备列表更新通知，确保其他部分也能获取到最新状态
                 NotificationCenter.default.post(
                     name: Notification.Name("BluetoothDevicesUpdatedNotification"),
                     object: self,
                     userInfo: ["devices": self.devices]
                 )
-                
-                // 立即触发StatusBarManager的updateStatusItems方法，确保状态栏图标立即更新
-                DispatchQueue.main.async {
-                    let appDelegate = NSApplication.shared.delegate as? AppDelegate
-                    let statusBarManager = appDelegate?.statusBarManager
-                    
-                    if let statusBarManager = statusBarManager {
-                        statusBarManager.updateStatusItems(devices: self.devices)
-                    }
-                }
                 
                 // 调用回调函数，通知调用者设备列表已经更新完成
                 completion?()
@@ -531,22 +527,20 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
             DispatchQueue.main.async {
                 self.devices.removeAll()
                 
-                // 发送设备列表更新通知，确保状态栏和菜单立即更新
+                // 立即触发StatusBarManager的updateStatusItems方法，确保状态栏图标立即更新
+                let appDelegate = NSApplication.shared.delegate as? AppDelegate
+                let statusBarManager = appDelegate?.statusBarManager
+                
+                if let statusBarManager = statusBarManager {
+                    statusBarManager.updateStatusItems(devices: self.devices)
+                }
+                
+                // 发送设备列表更新通知，确保其他部分也能获取到最新状态
                 NotificationCenter.default.post(
                     name: Notification.Name("BluetoothDevicesUpdatedNotification"),
                     object: self,
                     userInfo: ["devices": self.devices]
                 )
-                
-                // 立即触发StatusBarManager的updateStatusItems方法，确保状态栏图标立即更新
-                DispatchQueue.main.async {
-                    let appDelegate = NSApplication.shared.delegate as? AppDelegate
-                    let statusBarManager = appDelegate?.statusBarManager
-                    
-                    if let statusBarManager = statusBarManager {
-                        statusBarManager.updateStatusItems(devices: self.devices)
-                    }
-                }
                 
                 // 调用回调函数，通知调用者设备列表已经更新完成
                 completion?()
@@ -3622,51 +3616,123 @@ struct IconDisplaySettingsView: View {
 
 // 缓存机制
 var systemProfilerCache: (data: [String: Any], timestamp: Date)?
-let cacheExpirationInterval: TimeInterval = 5 // 缓存过期时间（秒）
+let cacheExpirationInterval: TimeInterval = 60 // 缓存过期时间（秒）
 
-// 获取缓存的system_profiler数据
-func getCachedSystemProfilerData() -> [String: Any]? {
-    // 检查缓存是否存在且未过期
-    if let (cachedData, timestamp) = systemProfilerCache {
-        if Date().timeIntervalSince(timestamp) < cacheExpirationInterval {
-            // print("[\(localTimeString())] 使用缓存的system_profiler数据")
-            return cachedData
+// 缓存管理器类
+class CacheManager {
+    static let shared = CacheManager()
+    
+    private init() {
+        // 启动定期缓存刷新定时器
+        startCacheRefreshTimer()
+        // 初始刷新一次缓存
+        refreshSystemProfilerCache()
+    }
+    
+    // 启动定期缓存刷新定时器
+    private func startCacheRefreshTimer() {
+        Timer.scheduledTimer(withTimeInterval: cacheExpirationInterval, repeats: true) { [weak self] _ in
+            self?.refreshSystemProfilerCache()
         }
     }
     
-    // 缓存不存在或已过期，重新获取
-    print("[\(localTimeString())] 重新获取system_profiler数据")
-    let task = Process()
-    task.launchPath = "/usr/sbin/system_profiler"
-    task.arguments = ["SPBluetoothDataType", "-json"]
-    
-    let pipe = Pipe()
-    task.standardOutput = pipe
-    
-    do {
-        try task.run()
-        task.waitUntilExit()
-        
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        if let jsonString = String(data: data, encoding: .utf8) {
-            if let data = jsonString.data(using: .utf8) {
-                do {
-                    if let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] {
-                        // 更新缓存
-                        systemProfilerCache = (json, Date())
-                        return json
+    // 异步刷新system_profiler缓存
+    func refreshSystemProfilerCache() {
+        DispatchQueue.global(qos: .background).async {
+            let task = Process()
+            task.launchPath = "/usr/sbin/system_profiler"
+            task.arguments = ["SPBluetoothDataType", "-json"]
+            
+            let pipe = Pipe()
+            task.standardOutput = pipe
+            
+            do {
+                try task.run()
+                task.waitUntilExit()
+                
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                if let jsonString = String(data: data, encoding: .utf8) {
+                    if let data = jsonString.data(using: .utf8) {
+                        do {
+                            if let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] {
+                                // 更新缓存
+                                systemProfilerCache = (data: json, timestamp: Date())
+                                print("[\(localTimeString())] 缓存已自动刷新")
+                            }
+                        } catch {
+                            print("Error parsing system_profiler JSON: \(error)")
+                        }
                     }
-                } catch {
-                    print("Error parsing system_profiler JSON: \(error)")
                 }
+            } catch {
+                print("Error running system_profiler: \(error)")
             }
         }
-    } catch {
-        print("Error running system_profiler: \(error)")
     }
     
-    return nil
+    // 获取缓存的system_profiler数据，只读取缓存，不触发刷新
+    func getCachedSystemProfilerData() -> [String: Any]? {
+        // 检查缓存是否存在
+        if let (cachedData, _) = systemProfilerCache {
+            return cachedData
+        }
+        
+        // 缓存不存在，同步获取一次
+        print("[\(localTimeString())] 缓存不存在，同步获取system_profiler数据")
+        
+        // 创建一个信号量来等待后台线程完成
+        let semaphore = DispatchSemaphore(value: 0)
+        var result: [String: Any]?
+        
+        // 在后台线程执行system_profiler命令
+        DispatchQueue.global(qos: .background).async {
+            let task = Process()
+            task.launchPath = "/usr/sbin/system_profiler"
+            task.arguments = ["SPBluetoothDataType", "-json"]
+            
+            let pipe = Pipe()
+            task.standardOutput = pipe
+            
+            do {
+                try task.run()
+                task.waitUntilExit()
+                
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                if let jsonString = String(data: data, encoding: .utf8) {
+                    if let data = jsonString.data(using: .utf8) {
+                        do {
+                            if let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] {
+                                // 更新缓存
+                                systemProfilerCache = (data: json, timestamp: Date())
+                                result = json
+                            }
+                        } catch {
+                            print("Error parsing system_profiler JSON: \(error)")
+                        }
+                    }
+                }
+            } catch {
+                print("Error running system_profiler: \(error)")
+            }
+            
+            // 信号量信号，通知主线程任务完成
+            semaphore.signal()
+        }
+        
+        // 等待后台线程完成，最多等待5秒
+        _ = semaphore.wait(timeout: .now() + 5)
+        
+        return result
+    }
 }
+
+// 便捷函数，用于获取缓存的system_profiler数据
+func getCachedSystemProfilerData() -> [String: Any]? {
+    return CacheManager.shared.getCachedSystemProfilerData()
+}
+
+// 初始化缓存管理器
+let cacheManager = CacheManager.shared
 
 // 从system_profiler获取蓝牙设备信息
 func getBluetoothDevicesFromSystemProfiler() -> [String: String] {
