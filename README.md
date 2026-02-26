@@ -2,6 +2,11 @@
 
 BtBar 是一款专为 macOS 设计的蓝牙设备管理工具，通过状态栏图标提供直观的蓝牙设备监控和控制功能。
 
+> **注意**：
+> BtBar 理论上支持 macOS 13.0 及更高版本。
+> 仅在 macOS 26 及更高版本中测试过，其他版本可能存在兼容性问题。
+> 代码全由 AI 生成，可能存在错误或不完整的部分。
+
 ## 功能特性
 
 - **设备管理**：自动扫描并列出已配对的蓝牙设备
@@ -21,6 +26,8 @@ BtBar 是一款专为 macOS 设计的蓝牙设备管理工具，通过状态栏�
 
 ### 从源代码构建
 
+#### 方法一：使用命令行构建
+
 1. 克隆仓库：
    ```bash
    git clone https://github.com/luantu/BtBar.git
@@ -36,6 +43,56 @@ BtBar 是一款专为 macOS 设计的蓝牙设备管理工具，通过状态栏�
    ```bash
    swift run
    ```
+
+#### 方法二：使用构建脚本
+
+1. 克隆仓库：
+   ```bash
+   git clone https://github.com/luantu/BtBar.git
+   cd BtBar
+   ```
+
+2. 运行构建脚本：
+   ```bash
+   chmod +x build_app.sh
+   ./build_app.sh
+   ```
+
+   该脚本会自动构建应用并创建一个可分发的应用包。
+
+#### 方法三：在Xcode中构建
+
+1. 克隆仓库：
+   ```bash
+   git clone https://github.com/luantu/BtBar.git
+   cd BtBar
+   ```
+
+2. 使用Xcode打开项目：
+   ```bash
+   open Package.swift
+   ```
+
+3. 在Xcode中，选择"Product" > "Build"来构建应用。
+
+4. 选择"Product" > "Run"来运行应用。
+
+### 安装到应用程序文件夹
+
+构建完成后，可以将应用安装到应用程序文件夹：
+
+1. 找到构建的应用：
+   ```bash
+   # 命令行构建的应用位于
+   .build/release/BtBar
+   ```
+
+2. 将应用复制到应用程序文件夹：
+   ```bash
+   cp -r .build/release/BtBar.app /Applications/
+   ```
+
+   或者，使用构建脚本构建的应用会自动创建在项目根目录。
 
 ## 使用方法
 

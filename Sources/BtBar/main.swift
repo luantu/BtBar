@@ -3241,7 +3241,8 @@ class StatusBarManager {
                     visualEffectView.appearance = NSAppearance(named: .darkAqua)
                     
                     // 定义垂直间距变量，用于调整弹出气泡各个项目之间的间距
-                    let verticalSpace: CGFloat = 8
+                    let verticalSpace: CGFloat = 9
+                    let leftPadding: CGFloat = 2
                     
                     // 定义元素高度
                     let iconHeight: CGFloat = 34
@@ -3255,7 +3256,7 @@ class StatusBarManager {
                     var currentY: CGFloat = topPadding
                     
                     /////////////////////// 添加设备图标
-                    let iconImageView = NSImageView(frame: NSRect(x: 12, y: popoverHeight - currentY - iconHeight, width: 34, height: 34))
+                    let iconImageView = NSImageView(frame: NSRect(x: 12 + leftPadding, y: popoverHeight - currentY - iconHeight, width: 34, height: 34))
                     // 使用可复用的方法获取设备图标
                     if let deviceIcon = self.getDeviceIcon(for: device, size: NSSize(width: 34, height: 34), applyTemplate: true) {
                         iconImageView.image = deviceIcon
@@ -3278,37 +3279,36 @@ class StatusBarManager {
                     visualEffectView.addSubview(iconImageView)
                     
                     /////////////////////// 添加电量圆形指示器
-                    if device.isConnected {
-                        // 计算电量值
-                        var batteryLevel: Int = 0
-                        if device.isAppleDevice {
-                            // 苹果设备的电量计算逻辑
-                            if let leftLevel = device.leftBatteryLevel, let rightLevel = device.rightBatteryLevel {
-                                // 左右耳都有，使用平均值
-                                batteryLevel = (leftLevel + rightLevel) / 2
-                            } else if let leftLevel = device.leftBatteryLevel {
-                                // 只有左耳，使用左耳电量
-                                batteryLevel = leftLevel
-                            } else if let rightLevel = device.rightBatteryLevel {
-                                // 只有右耳，使用右耳电量
-                                batteryLevel = rightLevel
-                            } else {
-                                // 没有电量信息
-                                batteryLevel = 0
-                            }
+
+                    // 计算电量值
+                    var batteryLevel: Int = 0
+                    if device.isAppleDevice {
+                        // 苹果设备的电量计算逻辑
+                        if let leftLevel = device.leftBatteryLevel, let rightLevel = device.rightBatteryLevel {
+                            // 左右耳都有，使用平均值
+                            batteryLevel = (leftLevel + rightLevel) / 2
+                        } else if let leftLevel = device.leftBatteryLevel {
+                            // 只有左耳，使用左耳电量
+                            batteryLevel = leftLevel
+                        } else if let rightLevel = device.rightBatteryLevel {
+                            // 只有右耳，使用右耳电量
+                            batteryLevel = rightLevel
                         } else {
-                            // 非苹果设备使用通用电量
-                            batteryLevel = device.batteryLevel ?? 0
+                            // 没有电量信息
+                            batteryLevel = 0
                         }
-                        
-                        // 创建电量指示器视图
-                        let batteryIndicator = BatteryCircleView(frame: NSRect(x: 220 - 60, y: popoverHeight - currentY - 40, width: 40, height: 40))
-                        batteryIndicator.batteryLevel = batteryLevel
-                        visualEffectView.addSubview(batteryIndicator)
+                    } else {
+                        // 非苹果设备使用通用电量
+                        batteryLevel = device.batteryLevel ?? 0
                     }
                     
+                    // 创建电量指示器视图
+                    let batteryIndicator = BatteryCircleView(frame: NSRect(x: 220 - 60, y: popoverHeight - currentY - 45, width: 40, height: 40))
+                    batteryIndicator.batteryLevel = batteryLevel
+                    visualEffectView.addSubview(batteryIndicator)
+                    
                     ////////////////////// 添加设备名称
-                    let nameLabel = NSTextField(frame: NSRect(x: 46, y: popoverHeight - currentY - nameHeight - 10, width: 194, height: 18))
+                    let nameLabel = NSTextField(frame: NSRect(x: 46 + leftPadding, y: popoverHeight - currentY - nameHeight - 10, width: 194, height: 18))
                     nameLabel.stringValue = device.name
                     nameLabel.isBezeled = false
                     nameLabel.isEditable = false
@@ -3321,7 +3321,7 @@ class StatusBarManager {
                     currentY += max(iconHeight, nameHeight) + verticalSpace
                     
                     /////////////////// 添加连接状态
-                    let statusLabel = NSTextField(frame: NSRect(x: 12, y: popoverHeight - currentY - statusHeight, width: 236, height: 16))
+                    let statusLabel = NSTextField(frame: NSRect(x: 12 + leftPadding, y: popoverHeight - currentY - statusHeight, width: 236, height: 16))
                     statusLabel.stringValue = "连接状态: \(device.isConnected ? "已连接" : "未连接")"
                     statusLabel.isBezeled = false
                     statusLabel.isEditable = false
@@ -3333,7 +3333,7 @@ class StatusBarManager {
                     currentY += statusHeight + verticalSpace
                     
                     ////////////////////////// 添加MAC地址
-                    let macLabel = NSTextField(frame: NSRect(x: 12, y: popoverHeight - currentY - macHeight, width: 236, height: 16))
+                    let macLabel = NSTextField(frame: NSRect(x: 12 + leftPadding, y: popoverHeight - currentY - macHeight, width: 236, height: 16))
                     macLabel.stringValue = "MAC地址: \(device.macAddress)"
                     macLabel.isBezeled = false
                     macLabel.isEditable = false
@@ -3345,7 +3345,7 @@ class StatusBarManager {
                     currentY += macHeight + verticalSpace
                     
                     ////////////////////// 添加电量信息和电池图标
-                    let batteryView = NSView(frame: NSRect(x: 12, y: popoverHeight - currentY - batteryHeight, width: 236, height: 20))
+                    let batteryView = NSView(frame: NSRect(x: 12 + leftPadding, y: popoverHeight - currentY - batteryHeight, width: 236, height: 20))
                     
                     // 添加电量标签
                     let batteryLabel = NSTextField(frame: NSRect(x: 0, y: 0, width: 35, height: 20))
