@@ -2866,13 +2866,170 @@ class StatusBarManager {
         }
     }
     
+    // 加载指示器视图类
+    private class LoadingOverlayView: NSView {
+        private let activityIndicator = NSProgressIndicator()
+        private let loadingLabel = NSTextField()
+        
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            setupView()
+        }
+        
+        required init?(coder: NSCoder) {
+            super.init(coder: coder)
+            setupView()
+        }
+        
+        private func setupView() {
+            // 设置背景为半透明黑色
+            wantsLayer = true
+            layer?.backgroundColor = NSColor.black.withAlphaComponent(0.5).cgColor
+            layer?.cornerRadius = 8.0
+            
+            // 创建活动指示器
+            activityIndicator.style = .spinning
+            activityIndicator.isIndeterminate = true
+            activityIndicator.frame = NSRect(x: frame.width/2 - 15, y: frame.height/2 + 10, width: 30, height: 30)
+            addSubview(activityIndicator)
+            
+            // 创建加载标签
+            loadingLabel.stringValue = "Processing..."
+            loadingLabel.isBezeled = false
+            loadingLabel.isEditable = false
+            loadingLabel.backgroundColor = .clear
+            loadingLabel.textColor = .white
+            loadingLabel.font = NSFont.systemFont(ofSize: 13)
+            loadingLabel.alignment = .center
+            loadingLabel.frame = NSRect(x: 0, y: frame.height/2 - 20, width: frame.width, height: 20)
+            addSubview(loadingLabel)
+            
+            // 开始动画
+            activityIndicator.startAnimation(nil)
+        }
+        
+        func stopLoading() {
+            activityIndicator.stopAnimation(nil)
+            removeFromSuperview()
+        }
+    }
+    
+    // 存储当前的加载遮罩
+    private var currentLoadingOverlay: LoadingOverlayView?
+    
     @objc private func toggleDeviceConnection(_ sender: NSMenuItem) {
         if let device = sender.representedObject as? BluetoothDevice {
+            // 显示加载遮罩
+            showLoadingOverlay(for: sender)
+            
             if device.isConnected {
                 bluetoothManager.disconnectDevice(device)
             } else {
                 bluetoothManager.connectDevice(device)
             }
+            
+            // 监听设备状态变化
+            let notificationCenter = NotificationCenter.default
+            
+            // 使用局部变量来存储观察者引用
+            var observerRef: NSObjectProtocol?
+            
+            // 监听BluetoothDevicesUpdatedNotification通知
+            observerRef = notificationCenter.addObserver(forName: Notification.Name("BluetoothDevicesUpdatedNotification"), object: nil, queue: nil) { [weak self, weak observerRef] notification in
+                // 检查设备状态是否变化
+                if let updatedDevice = self?.bluetoothManager.devices.first(where: { $0.id == device.id }) {
+                    if updatedDevice.isConnected != device.isConnected {
+                        // 设备状态已变化，更新菜单
+                        self?.hideLoadingOverlay()
+                        self?.updateDeviceSubmenu(sender: sender)
+                        // 移除观察者
+                        if let observer = observerRef {
+                            notificationCenter.removeObserver(observer)
+                        }
+                    }
+                }
+            }
+            
+            // 设置超时处理
+            DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self, weak observerRef] in
+                // 10秒后如果还没收到通知，自动隐藏加载遮罩
+                self?.hideLoadingOverlay()
+                if let observer = observerRef {
+                    notificationCenter.removeObserver(observer)
+                }
+            }
+        }
+    }
+    
+    // 显示加载遮罩
+    private func showLoadingOverlay(for menuItem: NSMenuItem) {
+        // 隐藏之前的加载遮罩
+        hideLoadingOverlay()
+        
+        // 获取subMenu
+        guard let submenu = menuItem.menu else { return }
+        
+        // 计算subMenu的大小
+        let submenuRect = NSRect(x: 0, y: 0, width: 220, height: 200) // 固定大小
+        
+        // 创建加载遮罩
+        let overlayFrame = NSRect(x: 0, y: 0, width: submenuRect.width, height: submenuRect.height)
+        let overlay = LoadingOverlayView(frame: overlayFrame)
+        
+        // 添加到subMenu的第一个菜单项的视图上
+        if let firstItem = submenu.item(at: 0), let firstView = firstItem.view {
+            firstView.addSubview(overlay)
+            currentLoadingOverlay = overlay
+        }
+    }
+    
+    // 隐藏加载遮罩
+    private func hideLoadingOverlay() {
+        currentLoadingOverlay?.stopLoading()
+        currentLoadingOverlay = nil
+    }
+    
+    // 更新设备的subMenu内容
+    private func updateDeviceSubmenu(sender: NSMenuItem) {
+        // 获取当前设备
+        guard let device = sender.representedObject as? BluetoothDevice else { return }
+        
+        // 获取设备的最新状态
+        var updatedDevice = device
+        if let index = bluetoothManager.devices.firstIndex(where: { $0.id == device.id }) {
+            updatedDevice = bluetoothManager.devices[index]
+        }
+        
+        // 获取subMenu
+        guard let submenu = sender.menu else { return }
+        
+        // 移除旧的菜单项（保留设备信息和分隔线）
+        while submenu.numberOfItems > 2 { // 保留前两个项：设备信息和分隔线
+            submenu.removeItem(at: 2)
+        }
+        
+        // 重新添加菜单项
+        // 连接/断开操作
+        let connectAction = updatedDevice.isConnected ? "Disconnect" : "Connect"
+        let connectItem = createMenuItemWithHoverEffect(title: connectAction, action: #selector(toggleDeviceConnection(_:)), keyEquivalent: "", imageName: updatedDevice.isConnected ? "microphone.slash" : "microphone", target: self, representedObject: updatedDevice)
+        submenu.addItem(connectItem)
+        
+        // 修改图标操作
+        let changeIconItem = createMenuItemWithHoverEffect(title: "Change Icon", action: #selector(changeDeviceIcon(_:)), keyEquivalent: "", imageName: "paintbrush", target: self, representedObject: updatedDevice)
+        submenu.addItem(changeIconItem)
+        
+        // 状态栏图标显示选项
+        // 检查设备是否满足显示图标的条件
+        let shouldShowIcon = updatedDevice.isConnected && (showDeviceIcons[updatedDevice.id] ?? true)
+        // 根据实际显示状态设置菜单项文本
+        let showStatusIconAction = shouldShowIcon ? "Hide Status Bar Icon" : "Show Status Bar Icon"
+        let showStatusIconItem = createMenuItemWithHoverEffect(title: showStatusIconAction, action: #selector(toggleDeviceStatusIcon(_:)), keyEquivalent: "", imageName: shouldShowIcon ? "eye.slash" : "eye", target: self, representedObject: updatedDevice)
+        submenu.addItem(showStatusIconItem)
+        
+        // 设置为默认音频设备
+        if updatedDevice.isConnected {
+            let audioDeviceItem = createMenuItemWithHoverEffect(title: "Set as Audio Device", action: #selector(setDefaultAudioDeviceForMenuItem(_:)), keyEquivalent: "", imageName: "music.microphone.circle", target: self, representedObject: updatedDevice)
+            submenu.addItem(audioDeviceItem)
         }
     }
     
