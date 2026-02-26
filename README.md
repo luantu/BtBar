@@ -9,6 +9,10 @@ BtBar 是一款专为 macOS 设计的蓝牙设备管理工具，通过状态栏�
 
 ## 功能特性
 
+<img width="225" height="200" alt="PixPin_2026-02-26_17-33-40" src="https://github.com/user-attachments/assets/e0a7bcaf-76b9-46af-ad6d-d87be0ff7b01" /><img width="435" height="238" alt="PixPin_2026-02-26_17-33-14" src="https://github.com/user-attachments/assets/c587c5b3-75f0-46c9-8174-8bebef6402ad" />
+
+
+
 - **设备管理**：自动扫描并列出已配对的蓝牙设备
 - **连接控制**：支持设备的连接和断开操作
 - **状态监控**：实时监控设备连接状态和电量
