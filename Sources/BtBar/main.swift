@@ -1304,20 +1304,20 @@ class StatusBarManager {
                 if let button = appStatusItem?.button {
                     // 使用自定义应用图标
                     if let customImage = self.getCustomIcon() {
-                        // 确保自定义图标不使用模板模式，保持原始白色
-                        customImage.isTemplate = false
+                        // 使用模板模式，让系统根据主题自动调整颜色
+                        customImage.isTemplate = true
                         button.image = customImage
                     } else {
                         // 如果自定义图标不可用，使用系统图标
                         if let image = NSImage(systemSymbolName: "bluetooth", accessibilityDescription: "Bluetooth") {
-                            // 确保系统图标不使用模板模式，保持原始白色
-                            image.isTemplate = false
+                            // 使用模板模式，让系统根据主题自动调整颜色
+                            image.isTemplate = true
                             button.image = image
                         } else {
                             // 如果系统图标也不可用，使用随机图标
                             let randomIcon = self.generateRandomIcon()
-                            // 确保随机图标不使用模板模式，保持原始颜色
-                            randomIcon.isTemplate = false
+                            // 使用模板模式，让系统根据主题自动调整颜色
+                            randomIcon.isTemplate = true
                             button.image = randomIcon
                         }
                     }
@@ -1578,6 +1578,20 @@ class StatusBarManager {
     }
     
     private func getCustomIcon() -> NSImage? {
+        // 优先使用系统的symbols图标
+        if let systemImage = NSImage(systemSymbolName: "square.stack.3d.up.fill", accessibilityDescription: "BtBar") {
+            // 设置图标尺寸为16x16像素
+            let configuration = NSImage.SymbolConfiguration(pointSize: 16, weight: .regular, scale: .medium)
+            if let configuredImage = systemImage.withSymbolConfiguration(configuration) {
+                // 使用模板模式，让系统根据主题自动调整颜色
+                configuredImage.isTemplate = true
+                return configuredImage
+            }
+            // 为原始图像也设置模板模式
+            systemImage.isTemplate = true
+            return systemImage
+        }
+        
         // 从Resources目录获取自定义图标
         let bundle = Bundle.main
         
