@@ -1267,14 +1267,14 @@ class StatusBarManager {
     @objc private func reloadDisplaySettings() {
         loadDeviceDisplaySettings()
         updateStatusItems(devices: bluetoothManager.devices)
-        print("Display settings reloaded")
+        print("[\(localTimeString())] Display settings reloaded")
     }
     
     private func loadDeviceDisplaySettings() {
         let defaults = UserDefaults.standard
         if let savedSettings = defaults.dictionary(forKey: "deviceDisplaySettings") as? [String: Bool] {
             showDeviceIcons = savedSettings
-            print("Loaded device display settings: \(showDeviceIcons)")
+            print("[\(localTimeString())] Loaded device display settings: \(showDeviceIcons)")
         }
     }
     
@@ -1282,7 +1282,7 @@ class StatusBarManager {
         let defaults = UserDefaults.standard
         defaults.set(showDeviceIcons, forKey: "deviceDisplaySettings")
         defaults.synchronize()
-        print("Saved device display settings: \(showDeviceIcons)")
+        print("[\(localTimeString())] Saved device display settings: \(showDeviceIcons)")
     }
     
     internal func updateStatusItems(devices: [BluetoothDevice]) {
@@ -1862,14 +1862,7 @@ class StatusBarManager {
                 menu.addItem(noDevicesItem)
                 menu.addItem(createVisualEffectSeparator())
             }
-            
-            // 添加设置项
-            // 暂时屏蔽设置菜单以避免崩溃
-            // if let settingsImage = NSImage(systemSymbolName: "gear", accessibilityDescription: "Settings") {
-            //     let settingsItem = createMenuItemWithVisualEffect(title: "Settings", action: #selector(self.openSettings), keyEquivalent: "", image: settingsImage, target: self)
-            //     menu.addItem(settingsItem)
-            // }
-            
+
             // 添加退出项
             if let quitImage = NSImage(systemSymbolName: "power", accessibilityDescription: "Quit") {
                 let quitItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -1877,12 +1870,12 @@ class StatusBarManager {
                 quitItem.image = nil
                 quitItem.isEnabled = true
                 // 创建自定义视图来控制图标的位置
-                let quitView = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 32))
+                let quitView = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
                 quitView.wantsLayer = true
                 quitView.layer?.backgroundColor = NSColor.clear.cgColor
                 
                 // 创建图标按钮
-                let quitButton = HoverableButton(frame: NSRect(x: 170, y: 4, width: 24, height: 24))
+                let quitButton = HoverableButton(frame: NSRect(x: 180, y: 0, width: 24, height: 24))
                 quitButton.setButtonType(.momentaryPushIn)
                 quitButton.bezelStyle = .texturedRounded
                 quitButton.image = quitImage
@@ -1906,9 +1899,6 @@ class StatusBarManager {
                 quitItem.view = quitView
                 menu.addItem(quitItem)
             }
-            
-            // 添加带有毛玻璃效果的空白菜单项，覆盖菜单底部边缘
-            // menu.addItem(createVisualEffectSpacer())
             
             // 缓存菜单
             self.cachedMenu = menu
@@ -2014,15 +2004,53 @@ class StatusBarManager {
     
     // 带鼠标悬停效果的视图子类
     private class HoverableView: NSView {
+        weak var menuItem: NSMenuItem?
+        
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            setupTrackingArea()
+        }
+        
+        required init?(coder: NSCoder) {
+            super.init(coder: coder)
+            setupTrackingArea()
+        }
+        
+        private func setupTrackingArea() {
+            let trackingArea = NSTrackingArea(
+                rect: self.bounds,
+                options: [.mouseEnteredAndExited, .activeAlways],
+                owner: self,
+                userInfo: nil
+            )
+            self.addTrackingArea(trackingArea)
+        }
+        
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            for trackingArea in self.trackingAreas {
+                self.removeTrackingArea(trackingArea)
+            }
+            setupTrackingArea()
+        }
+        
         override func mouseEntered(with event: NSEvent) {
             super.mouseEntered(with: event)
-            // 使用选中颜色以获得更高对比度
-            self.layer?.backgroundColor = NSColor.selectedControlColor.withAlphaComponent(0.6).cgColor
+            // 使用系统默认的菜单高亮颜色，与二级菜单保持一致
+            self.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.2).cgColor
         }
         
         override func mouseExited(with event: NSEvent) {
             super.mouseExited(with: event)
             self.layer?.backgroundColor = NSColor.clear.cgColor
+        }
+        
+        override func mouseDown(with event: NSEvent) {
+            super.mouseDown(with: event)
+            // 当点击视图时，触发菜单项的动作
+            if let menuItem = menuItem, let action = menuItem.action, let target = menuItem.target {
+                NSApp.sendAction(action, to: target, from: menuItem)
+            }
         }
     }
     
@@ -2085,9 +2113,43 @@ class StatusBarManager {
         }
     }
     
-    // 带鼠标悬停效果的按钮子类
+    // 带鼠标悬停效果和自定义tooltip的按钮子类
     private class HoverableButton: NSButton {
         weak var statusBarManager: StatusBarManager?
+        private static var tooltipWindow: NSWindow?
+        private static var tooltipLabel: NSTextField?
+        
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            setupButton()
+        }
+        
+        required init?(coder: NSCoder) {
+            super.init(coder: coder)
+            setupButton()
+        }
+        
+        private func setupButton() {
+            // 设置按钮样式
+            self.wantsLayer = true
+            self.layer?.backgroundColor = NSColor.clear.cgColor
+            self.layer?.cornerRadius = 8.0 // 添加圆角效果
+            self.isBordered = false
+            
+            // 设置图标颜色为偏白的灰色
+            if #available(macOS 10.14, *) {
+                self.contentTintColor = NSColor.lightGray
+            }
+            
+            // 添加鼠标跟踪区域
+            let trackingArea = NSTrackingArea(
+                rect: self.bounds,
+                options: [.mouseEnteredAndExited, .activeAlways, .mouseMoved, .inVisibleRect],
+                owner: self,
+                userInfo: nil
+            )
+            self.addTrackingArea(trackingArea)
+        }
         
         override func mouseDown(with event: NSEvent) {
             // 直接使用全局鼠标位置，这是屏幕坐标
@@ -2095,7 +2157,6 @@ class StatusBarManager {
             
             // 存储点击位置到StatusBarManager
             statusBarManager?.lastClickLocation = globalLocation
-
             
             // 调用父类方法
             super.mouseDown(with: event)
@@ -2103,12 +2164,143 @@ class StatusBarManager {
         
         override func mouseEntered(with event: NSEvent) {
             super.mouseEntered(with: event)
-            self.layer?.backgroundColor = NSColor.selectedControlColor.withAlphaComponent(0.6).cgColor
+            // 鼠标悬停时，背景变为浅灰色，透明度 0.3
+            self.layer?.backgroundColor = NSColor.lightGray.withAlphaComponent(0.3).cgColor
+            // 显示自定义tooltip
+            showCustomTooltip()
         }
         
         override func mouseExited(with event: NSEvent) {
             super.mouseExited(with: event)
+            // 鼠标离开时，背景变为透明
             self.layer?.backgroundColor = NSColor.clear.cgColor
+            // 隐藏自定义tooltip
+            hideCustomTooltip()
+        }
+        
+        override func mouseMoved(with event: NSEvent) {
+            super.mouseMoved(with: event)
+        }
+        
+        private func showCustomTooltip() {
+            guard let toolTip = self.toolTip, !toolTip.isEmpty else {
+                return
+            }
+            
+            // 隐藏已有的tooltip
+            hideCustomTooltip()
+            
+            // 创建tooltip视图
+            // 计算tooltip宽度，确保能够容纳所有文本
+            let tooltipFont = NSFont.systemFont(ofSize: 12)
+            let attributes: [NSAttributedString.Key: Any] = [.font: tooltipFont]
+            let attributedText = NSAttributedString(string: toolTip, attributes: attributes)
+            let textSize = attributedText.size()
+            // 保守计算宽度：取文本实际宽度和字符数*8中的较大值，确保每个字符都有足够的宽度
+            let charBasedWidth = CGFloat(toolTip.count * 8)
+            let baseWidth = max(textSize.width, charBasedWidth)
+            // 增加更多的边距，确保文本不会被遮挡
+            let tooltipWidth = CGFloat(min(200, baseWidth + 32)) // 32为左右边距，增加更多边距确保文本不会被遮挡
+            let tooltipHeight: CGFloat = 28 // 增加高度，确保文本不会被遮挡
+            
+            // 创建或重用tooltip窗口
+            if HoverableButton.tooltipWindow == nil {
+                // 创建透明窗口
+                let newWindow = NSWindow(
+                    contentRect: NSRect(x: 0, y: 0, width: Int(tooltipWidth), height: Int(tooltipHeight)),
+                    styleMask: [.borderless],
+                    backing: .buffered,
+                    defer: false
+                )
+                newWindow.backgroundColor = .clear
+                newWindow.ignoresMouseEvents = true
+                newWindow.level = .screenSaver // 设置为最高层级，确保显示在最顶端
+                
+                // 创建半透明背景视图
+                let transparentView = NSView(frame: NSRect(x: 0, y: 0, width: Int(tooltipWidth), height: Int(tooltipHeight)))
+                transparentView.wantsLayer = true
+                transparentView.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.3).cgColor 
+                transparentView.layer?.cornerRadius = 4.0
+                
+                // 创建文本字段
+                let label = NSTextField(frame: NSRect(x: 16, y: 4, width: Int(tooltipWidth) - 32, height: Int(tooltipHeight) - 8))
+                label.isBezeled = false
+                label.isEditable = false
+                label.backgroundColor = .clear
+                label.textColor = .lightGray
+                label.font = NSFont.systemFont(ofSize: 12)
+                label.alignment = .center
+                
+                // 添加文本字段到透明视图
+                transparentView.addSubview(label)
+                newWindow.contentView = transparentView
+                
+                // 存储窗口和标签
+                HoverableButton.tooltipWindow = newWindow
+                HoverableButton.tooltipLabel = label
+            } else {
+                // 更新现有窗口大小
+                HoverableButton.tooltipWindow?.setContentSize(NSSize(width: tooltipWidth, height: tooltipHeight))
+                if let contentView = HoverableButton.tooltipWindow?.contentView {
+                    contentView.frame = NSRect(x: 0, y: 0, width: Int(tooltipWidth), height: Int(tooltipHeight))
+                }
+                // 更新标签大小和位置
+                HoverableButton.tooltipLabel?.frame = NSRect(x: 16, y: 4, width: Int(tooltipWidth) - 32, height: Int(tooltipHeight) - 8)
+            }
+            
+            // 更新标签文本
+            HoverableButton.tooltipLabel?.stringValue = toolTip
+            
+            // 计算tooltip位置
+            let mouseLocation = NSEvent.mouseLocation
+            let tooltipX = mouseLocation.x - (tooltipWidth / 2)
+            let tooltipY = mouseLocation.y - tooltipHeight - 20.0 // 显示在鼠标正下方
+            
+            // 设置tooltip窗口位置
+            HoverableButton.tooltipWindow?.setFrameOrigin(NSPoint(x: tooltipX, y: tooltipY))
+            HoverableButton.tooltipWindow?.makeKeyAndOrderFront(nil)
+        }
+        
+        private func hideCustomTooltip() {
+            if let tooltipWindow = HoverableButton.tooltipWindow {
+                tooltipWindow.orderOut(nil) // 只是隐藏，不关闭
+            }
+        }
+        
+        // 确保窗口在按钮销毁时被关闭
+        deinit {
+            hideCustomTooltip()
+        }
+        
+        // 静态方法，用于隐藏所有tooltip窗口
+        static func hideAllTooltips() {
+            if let tooltipWindow = HoverableButton.tooltipWindow {
+                tooltipWindow.orderOut(nil)
+            }
+        }
+        
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            // 确保跟踪区域在 bounds 变化时更新
+            for trackingArea in self.trackingAreas {
+                self.removeTrackingArea(trackingArea)
+            }
+            
+            let trackingArea = NSTrackingArea(
+                rect: self.bounds,
+                options: [.mouseEnteredAndExited, .activeAlways, .mouseMoved, .inVisibleRect],
+                owner: self,
+                userInfo: nil
+            )
+            self.addTrackingArea(trackingArea)
+        }
+        
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            // 确保窗口存在时鼠标事件能正常工作
+            if let window = self.window {
+                window.acceptsMouseMovedEvents = true
+            }
         }
     }
     
@@ -2214,6 +2406,42 @@ class StatusBarManager {
         return menuItem
     }
     
+    // 创建带有悬停效果的菜单项
+    private func createMenuItemWithHoverEffect(title: String, action: Selector?, keyEquivalent: String, imageName: String, target: AnyObject?, representedObject: Any?) -> NSMenuItem {
+        let menuItem = NSMenuItem(title: "", action: action, keyEquivalent: keyEquivalent)
+        menuItem.target = target
+        menuItem.representedObject = representedObject
+        
+        // 创建带有悬停效果的视图
+        let menuItemView = HoverableView(frame: NSRect(x: 0, y: 0, width: 220, height: 32))
+        menuItemView.wantsLayer = true
+        menuItemView.layer?.backgroundColor = NSColor.clear.cgColor
+        // 设置menuItem属性，确保点击事件能够正确触发
+        menuItemView.menuItem = menuItem
+        
+        // 添加图标
+        let iconImageView = NSImageView(frame: NSRect(x: 8, y: 4, width: 24, height: 24))
+        if let image = NSImage(systemSymbolName: imageName, accessibilityDescription: title) {
+            image.isTemplate = true
+            iconImageView.image = image
+        }
+        menuItemView.addSubview(iconImageView)
+        
+        // 添加文本
+        let titleLabel = NSTextField(frame: NSRect(x: 40, y: 0, width: 180, height: 24))
+        titleLabel.stringValue = title
+        titleLabel.isBezeled = false
+        titleLabel.isEditable = false
+        titleLabel.backgroundColor = .clear
+        titleLabel.textColor = .labelColor
+        titleLabel.font = NSFont.systemFont(ofSize: 13)
+        titleLabel.isSelectable = false
+        menuItemView.addSubview(titleLabel)
+        
+        menuItem.view = menuItemView
+        return menuItem
+    }
+    
     private func createVisualEffectSeparator() -> NSMenuItem {
         let separatorItem = NSMenuItem.separator()
         return separatorItem
@@ -2302,7 +2530,7 @@ class StatusBarManager {
             }
             
             // 创建电量指示器视图
-            let batteryIndicator = BatteryCircleView(frame: NSRect(x: 170, y: 5, width: 40, height: 40))
+            let batteryIndicator = BatteryCircleView(frame: NSRect(x: 165, y: 5, width: 40, height: 40))
             batteryIndicator.batteryLevel = batteryLevel
             deviceInfoView.addSubview(batteryIndicator)
         }
@@ -2315,23 +2543,13 @@ class StatusBarManager {
         
         // 连接/断开操作
         let connectAction = device.isConnected ? "Disconnect" : "Connect"
-        let connectItem = NSMenuItem(title: connectAction, action: #selector(toggleDeviceConnection(_:)), keyEquivalent: "")
-        connectItem.target = self
-        connectItem.representedObject = device
-        if let image = NSImage(systemSymbolName: device.isConnected ? "microphone.slash" : "microphone", accessibilityDescription: connectAction) {
-            connectItem.image = image
-        }
+        let connectItem = createMenuItemWithHoverEffect(title: connectAction, action: #selector(toggleDeviceConnection(_:)), keyEquivalent: "", imageName: device.isConnected ? "microphone.slash" : "microphone", target: self, representedObject: device)
         submenu.addItem(connectItem)
         
 
         
         // 修改图标操作
-        let changeIconItem = NSMenuItem(title: "Change Icon", action: #selector(changeDeviceIcon(_:)), keyEquivalent: "")
-        changeIconItem.target = self
-        changeIconItem.representedObject = device
-        if let image = NSImage(systemSymbolName: "paintbrush", accessibilityDescription: "Change Icon") {
-            changeIconItem.image = image
-        }
+        let changeIconItem = createMenuItemWithHoverEffect(title: "Change Icon", action: #selector(changeDeviceIcon(_:)), keyEquivalent: "", imageName: "paintbrush", target: self, representedObject: device)
         submenu.addItem(changeIconItem)
         
         // 状态栏图标显示选项
@@ -2340,22 +2558,12 @@ class StatusBarManager {
         // 根据实际显示状态设置菜单项文本
         // 默认显示为"Show Status Bar Icon"，只有当设备图标实际显示在状态栏上时才显示为"Hide Status Bar Icon"
         let showStatusIconAction = shouldShowIcon ? "Hide Status Bar Icon" : "Show Status Bar Icon"
-        let showStatusIconItem = NSMenuItem(title: showStatusIconAction, action: #selector(toggleDeviceStatusIcon(_:)), keyEquivalent: "")
-        showStatusIconItem.target = self
-        showStatusIconItem.representedObject = device
-        if let image = NSImage(systemSymbolName: shouldShowIcon ? "eye.slash" : "eye", accessibilityDescription: showStatusIconAction) {
-            showStatusIconItem.image = image
-        }
+        let showStatusIconItem = createMenuItemWithHoverEffect(title: showStatusIconAction, action: #selector(toggleDeviceStatusIcon(_:)), keyEquivalent: "", imageName: shouldShowIcon ? "eye.slash" : "eye", target: self, representedObject: device)
         submenu.addItem(showStatusIconItem)
         
         // 设置为默认音频设备
         if device.isConnected {
-            let audioDeviceItem = NSMenuItem(title: "Set as Audio Device", action: #selector(setDefaultAudioDeviceForMenuItem(_:)), keyEquivalent: "")
-            audioDeviceItem.target = self
-            audioDeviceItem.representedObject = device
-            if let image = NSImage(systemSymbolName: "music.microphone.circle", accessibilityDescription: "Set as Default Audio Device") {
-                audioDeviceItem.image = image
-            }
+            let audioDeviceItem = createMenuItemWithHoverEffect(title: "Set as Audio Device", action: #selector(setDefaultAudioDeviceForMenuItem(_:)), keyEquivalent: "", imageName: "music.microphone.circle", target: self, representedObject: device)
             submenu.addItem(audioDeviceItem)
         }
         
@@ -2846,7 +3054,7 @@ class StatusBarManager {
                     let popover = NSPopover()
                     popover.behavior = .transient // 点击外部时自动关闭
                     // 增加气泡高度，以容纳底部的操作按钮
-                    let popoverHeight = 150.0 
+                    let popoverHeight = 160.0 
                     popover.contentSize = NSSize(width: 220, height: popoverHeight) // 调整尺寸以适应电池图标和操作按钮
                     popover.animates = true // 添加动画效果
                     // 确保气泡显示到最上层
@@ -2862,7 +3070,7 @@ class StatusBarManager {
                     visualEffectView.appearance = NSAppearance(named: .darkAqua)
                     
                     // 定义垂直间距变量，用于调整弹出气泡各个项目之间的间距
-                    let verticalSpace: CGFloat = 5
+                    let verticalSpace: CGFloat = 8
                     
                     // 定义元素高度
                     let iconHeight: CGFloat = 34
@@ -2923,7 +3131,7 @@ class StatusBarManager {
                         }
                         
                         // 创建电量指示器视图
-                        let batteryIndicator = BatteryCircleView(frame: NSRect(x: 220 - 50, y: popoverHeight - currentY - 40, width: 40, height: 40))
+                        let batteryIndicator = BatteryCircleView(frame: NSRect(x: 220 - 60, y: popoverHeight - currentY - 40, width: 40, height: 40))
                         batteryIndicator.batteryLevel = batteryLevel
                         visualEffectView.addSubview(batteryIndicator)
                     }
@@ -3112,14 +3320,16 @@ class StatusBarManager {
                     
                     // Disconnect 按钮
                     if device.isConnected {
-                        let disconnectButton = NSButton(frame: NSRect(x: 20, y: 5, width: 30, height: 30))
+                        let disconnectButton = HoverableButton(frame: NSRect(x: 20, y: 5, width: 30, height: 30))
                         disconnectButton.setButtonType(.momentaryPushIn)
-                        disconnectButton.bezelStyle = .texturedRounded
                         if let image = NSImage(systemSymbolName: "microphone.slash", accessibilityDescription: "Disconnect") {
                             image.isTemplate = true
                             disconnectButton.image = image
                         }
                         disconnectButton.toolTip = "Disconnect"
+                        disconnectButton.isEnabled = true
+                        // 设置 statusBarManager 引用
+                        disconnectButton.statusBarManager = self
                         // 创建一个闭包来处理按钮点击事件
                         let disconnectAction: () -> Void = { [weak self] in
                             self?.bluetoothManager.disconnectDevice(device)
@@ -3135,14 +3345,16 @@ class StatusBarManager {
                     }
                     
                     // Change Icon 按钮
-                    let changeIconButton = NSButton(frame: NSRect(x: 70, y: 5, width: 30, height: 30))
+                    let changeIconButton = HoverableButton(frame: NSRect(x: 70, y: 5, width: 30, height: 30))
                     changeIconButton.setButtonType(.momentaryPushIn)
-                    changeIconButton.bezelStyle = .texturedRounded
                     if let image = NSImage(systemSymbolName: "paintbrush", accessibilityDescription: "Change Icon") {
                         image.isTemplate = true
                         changeIconButton.image = image
                     }
                     changeIconButton.toolTip = "Change Icon"
+                    changeIconButton.isEnabled = true
+                    // 设置 statusBarManager 引用
+                    changeIconButton.statusBarManager = self
                     // 创建一个闭包来处理按钮点击事件
                     let changeIconAction: () -> Void = { [weak self] in
                         // 创建一个临时的 NSMenuItem 来传递设备信息
@@ -3160,9 +3372,8 @@ class StatusBarManager {
                     self.buttonActions[changeIconButton] = changeIconAction
                     
                     // Hide Status Bar Icon 按钮
-                    let hideIconButton = NSButton(frame: NSRect(x: 120, y: 5, width: 30, height: 30))
+                    let hideIconButton = HoverableButton(frame: NSRect(x: 120, y: 5, width: 30, height: 30))
                     hideIconButton.setButtonType(.momentaryPushIn)
-                    hideIconButton.bezelStyle = .texturedRounded
                     let shouldShowIcon = device.isConnected && (self.showDeviceIcons[device.id] ?? true)
                     let hideIconName = shouldShowIcon ? "eye.slash" : "eye"
                     if let image = NSImage(systemSymbolName: hideIconName, accessibilityDescription: shouldShowIcon ? "Hide Status Bar Icon" : "Show Status Bar Icon") {
@@ -3170,6 +3381,9 @@ class StatusBarManager {
                         hideIconButton.image = image
                     }
                     hideIconButton.toolTip = shouldShowIcon ? "Hide Status Bar Icon" : "Show Status Bar Icon"
+                    hideIconButton.isEnabled = true
+                    // 设置 statusBarManager 引用
+                    hideIconButton.statusBarManager = self
                     // 创建一个闭包来处理按钮点击事件
                     let hideIconAction: () -> Void = { [weak self] in
                         // 创建一个临时的 NSMenuItem 来传递设备信息
@@ -3188,14 +3402,16 @@ class StatusBarManager {
                     
                     // Set as Default Audio Device 按钮
                     if device.isConnected {
-                        let audioDeviceButton = NSButton(frame: NSRect(x: 170, y: 5, width: 30, height: 30))
+                        let audioDeviceButton = HoverableButton(frame: NSRect(x: 170, y: 5, width: 30, height: 30))
                         audioDeviceButton.setButtonType(.momentaryPushIn)
-                        audioDeviceButton.bezelStyle = .texturedRounded
                         if let image = NSImage(systemSymbolName: "music.microphone.circle", accessibilityDescription: "Set as Default Audio Device") {
                             image.isTemplate = true
                             audioDeviceButton.image = image
                         }
                         audioDeviceButton.toolTip = "Set as Default Audio Device"
+                        audioDeviceButton.isEnabled = true
+                        // 设置 statusBarManager 引用
+                        audioDeviceButton.statusBarManager = self
                         // 创建一个闭包来处理按钮点击事件
                         let audioDeviceAction: () -> Void = { [weak self] in
                             // 创建一个临时的 NSMenuItem 来传递设备信息
@@ -3232,6 +3448,9 @@ class StatusBarManager {
                     if autoClose {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
                             if popover.isShown {
+                                // 先隐藏所有tooltip窗口
+                                HoverableButton.hideAllTooltips()
+                                // 再关闭气泡
                                 popover.performClose(nil)
                             }
                         }
@@ -3240,6 +3459,9 @@ class StatusBarManager {
                     // 添加全局点击监听器，确保点击外部时关闭弹窗
                     NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak popover] event in
                         if let popover = popover, popover.isShown {
+                            // 先隐藏所有tooltip窗口
+                            HoverableButton.hideAllTooltips()
+                            // 再关闭气泡
                             popover.performClose(nil)
                         }
                     }
