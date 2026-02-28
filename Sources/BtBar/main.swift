@@ -2180,8 +2180,8 @@ class StatusBarManager {
             super.mouseEntered(with: event)
             // 鼠标悬停时，背景变为浅灰色，透明度 0.3
             self.layer?.backgroundColor = NSColor.lightGray.withAlphaComponent(0.3).cgColor
-            // 显示自定义tooltip
-            showCustomTooltip()
+            // 取消显示tooltip
+            // showCustomTooltip()
         }
         
         override func mouseExited(with event: NSEvent) {
@@ -2189,7 +2189,7 @@ class StatusBarManager {
             // 鼠标离开时，背景变为透明
             self.layer?.backgroundColor = NSColor.clear.cgColor
             // 隐藏自定义tooltip
-            hideCustomTooltip()
+            // hideCustomTooltip()
         }
         
         override func mouseMoved(with event: NSEvent) {
@@ -2214,7 +2214,7 @@ class StatusBarManager {
             let charBasedWidth = CGFloat(toolTip.count * 8)
             let baseWidth = max(textSize.width, charBasedWidth)
             // 增加更多的边距，确保文本不会被遮挡
-            let tooltipWidth = CGFloat(min(200, baseWidth + 32)) // 32为左右边距，增加更多边距确保文本不会被遮挡
+            let tooltipWidth = CGFloat(baseWidth + 32) // 32为左右边距，增加更多边距确保文本不会被遮挡
             let tooltipHeight: CGFloat = 28 // 增加高度，确保文本不会被遮挡
             
             // 创建或重用tooltip窗口
@@ -2229,15 +2229,33 @@ class StatusBarManager {
                 newWindow.backgroundColor = .clear
                 newWindow.ignoresMouseEvents = true
                 newWindow.level = .screenSaver // 设置为最高层级，确保显示在最顶端
+                newWindow.appearance = NSAppearance(named: .darkAqua) // 使用暗色外观，与详情气泡一致
                 
-                // 创建半透明背景视图
-                let transparentView = NSView(frame: NSRect(x: 0, y: 0, width: Int(tooltipWidth), height: Int(tooltipHeight)))
-                transparentView.wantsLayer = true
-                transparentView.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.3).cgColor 
-                transparentView.layer?.cornerRadius = 4.0
+                // 创建视觉效果视图，与详情气泡一致
+                let visualEffectView = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: Int(tooltipWidth), height: Int(tooltipHeight)))
+                visualEffectView.material = .popover
+                visualEffectView.blendingMode = .behindWindow
+                visualEffectView.state = .active
+                
+                // 添加圆角
+                visualEffectView.wantsLayer = true
+                visualEffectView.layer?.cornerRadius = 8.0
+                
+                // 添加细边框
+                visualEffectView.layer?.borderWidth = 0.5
+                visualEffectView.layer?.borderColor = NSColor.lightGray.withAlphaComponent(0.3).cgColor
+                
+                // 添加轻微的阴影效果
+                visualEffectView.layer?.shadowColor = NSColor.black.cgColor
+                visualEffectView.layer?.shadowOpacity = 0.1
+                visualEffectView.layer?.shadowOffset = NSSize(width: 0, height: 1)
+                visualEffectView.layer?.shadowRadius = 2.0
+                
+                // 创建容器视图，用于垂直居中放置文本字段
+                let containerView = NSView(frame: NSRect(x: 16, y: 0, width: Int(tooltipWidth) - 32, height: Int(tooltipHeight)))
                 
                 // 创建文本字段
-                let label = NSTextField(frame: NSRect(x: 16, y: 4, width: Int(tooltipWidth) - 32, height: Int(tooltipHeight) - 8))
+                let label = NSTextField(frame: NSRect(x: 0, y: 0, width: containerView.frame.width, height: 20))
                 label.isBezeled = false
                 label.isEditable = false
                 label.backgroundColor = .clear
@@ -2245,9 +2263,16 @@ class StatusBarManager {
                 label.font = NSFont.systemFont(ofSize: 12)
                 label.alignment = .center
                 
-                // 添加文本字段到透明视图
-                transparentView.addSubview(label)
-                newWindow.contentView = transparentView
+                // 计算垂直居中的位置，并稍微向下调整2个单位
+                let labelY = (containerView.frame.height - label.frame.height) / 2 - 2 
+                label.frame.origin.y = labelY
+                
+                // 添加文本字段到容器视图
+                containerView.addSubview(label)
+                
+                // 添加容器视图到视觉效果视图
+                visualEffectView.addSubview(containerView)
+                newWindow.contentView = visualEffectView
                 
                 // 存储窗口和标签
                 HoverableButton.tooltipWindow = newWindow
@@ -2257,13 +2282,30 @@ class StatusBarManager {
                 HoverableButton.tooltipWindow?.setContentSize(NSSize(width: tooltipWidth, height: tooltipHeight))
                 if let contentView = HoverableButton.tooltipWindow?.contentView {
                     contentView.frame = NSRect(x: 0, y: 0, width: Int(tooltipWidth), height: Int(tooltipHeight))
+                    // 更新容器视图大小
+                    if let containerView = contentView.subviews.first {
+                        containerView.frame = NSRect(x: 16, y: 0, width: Int(tooltipWidth) - 32, height: Int(tooltipHeight))
+                        // 更新标签大小和位置，确保垂直居中
+                        if let label = HoverableButton.tooltipLabel {
+                            label.frame = NSRect(x: 0, y: 0, width: containerView.frame.width, height: 20)
+                            // 计算垂直居中的位置，并稍微向下调整2个单位
+                            let labelY = (containerView.frame.height - label.frame.height) / 2 - 2
+                            label.frame.origin.y = labelY
+                        }
+                    }
                 }
-                // 更新标签大小和位置
-                HoverableButton.tooltipLabel?.frame = NSRect(x: 16, y: 4, width: Int(tooltipWidth) - 32, height: Int(tooltipHeight) - 8)
             }
             
-            // 更新标签文本
-            HoverableButton.tooltipLabel?.stringValue = toolTip
+            // 更新标签文本，使用带有垂直居中属性的NSAttributedString
+            let paragraphStyle = NSMutableParagraphStyle()
+            paragraphStyle.alignment = .center
+            paragraphStyle.lineBreakMode = .byTruncatingTail
+            let tooltipAttributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 12),
+                .foregroundColor: NSColor.lightGray,
+                .paragraphStyle: paragraphStyle
+            ]
+            HoverableButton.tooltipLabel?.attributedStringValue = NSAttributedString(string: toolTip, attributes: tooltipAttributes)
             
             // 计算tooltip位置
             let mouseLocation = NSEvent.mouseLocation
