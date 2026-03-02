@@ -218,14 +218,11 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
     @Published var devices: [BluetoothDevice] = []
     public var centralManager: CBCentralManager!
     private var peripherals: [CBPeripheral] = []
-    private var refreshTimer: Timer?
     
     override init() {
         super.init()
         centralManager = CBCentralManager(delegate: self, queue: nil)
         setupBluetoothNotifications()
-        // 启动电量监控
-        // startBatteryMonitoring() 不通过定时器，通过缓存刷新来触发。
     }
     
     private func setupBluetoothNotifications() {
@@ -301,34 +298,6 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
             self?.retrieveConnectedDevices()
         }
         
-        // 监听蓝牙设备断开通知（设备断开时触发）
-        // NotificationCenter.default.addObserver(
-        //     forName: Notification.Name("IOBluetoothDeviceDisconnected"),
-        //     object: nil,
-        //     queue: nil
-        // ) { [weak self] notification in
-        //     let timestamp = localTimeString()
-        //     print("[\(timestamp)] **** 收到蓝牙相关通知: IOBluetoothDeviceDisconnected")
-        //     print("[\(timestamp)] **** 通知对象: \(notification.object ?? "nil")")
-        //     print("[\(timestamp)] **** 通知对象类型: \(type(of: notification.object))")
-        //     self?.retrieveConnectedDevices()
-        // }
- 
-        // 监听所有蓝牙相关通知，用于调试
-        // NotificationCenter.default.addObserver(
-        //     forName: nil,
-        //     object: nil,
-        //     queue: nil
-        // ) { notification in
-        //     let timestamp = localTimeString()
-        //     let notificationName = notification.name.rawValue
-        //     if notificationName.contains("Bluetooth") || notificationName.contains("IOBluetooth") {
-        //         print("[\(timestamp)] 收到蓝牙相关通知: \(notificationName)")
-        //         print("[\(timestamp)] 通知对象: \(notification.object ?? "nil")")
-        //         print("[\(timestamp)] 通知对象类型: \(type(of: notification.object))")
-        //     }
-        // }
-        
         print("[\(timestamp)] 蓝牙通知监听器设置完成")
     }
     
@@ -346,30 +315,6 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
                 // 再次获取已连接的设备，确保没有遗漏
                 self.retrieveConnectedDevices()
             }
-            
-            // 启动定期刷新定时器
-            // startRefreshTimer()  定时器暂停，靠外部事件触发变化。
-        }
-    }
-    
-    private func startRefreshTimer() {
-        // 取消现有的定时器
-        if refreshTimer != nil {
-            refreshTimer?.invalidate()
-            refreshTimer = nil
-        }
-        
-        // 由于添加了完善的被动监听机制，将轮询间隔从30秒增加到60秒
-        // 轮询现在仅作为备用机制
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
-            self?.retrieveConnectedDevices()
-        }
-    }
-    
-    func stopRefreshTimer() {
-        if refreshTimer != nil {
-            refreshTimer?.invalidate()
-            refreshTimer = nil
         }
     }
     
@@ -530,12 +475,18 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
                                oldDevice.leftBatteryLevel != newDevice.leftBatteryLevel ||
                                oldDevice.rightBatteryLevel != newDevice.rightBatteryLevel ||
                                oldDevice.caseBatteryLevel != newDevice.caseBatteryLevel {
+                                print("[\(localTimeString())] 设备状态变化：\(oldDevice.id) 已连接状态从 \(oldDevice.isConnected) 变更为 \(newDevice.isConnected)")
+                                print("[\(localTimeString())] 设备状态变化：\(oldDevice.id) 电池电量从 \(oldDevice.batteryLevel ?? -1) 变更为 \(newDevice.batteryLevel ?? -1)")
+                                print("[\(localTimeString())] 设备状态变化：\(oldDevice.id) 左耳电池电量从 \(oldDevice.leftBatteryLevel ?? -1) 变更为 \(newDevice.leftBatteryLevel ?? -1)")
+                                print("[\(localTimeString())] 设备状态变化：\(oldDevice.id) 右耳电池电量从 \(oldDevice.rightBatteryLevel ?? -1) 变更为 \(newDevice.rightBatteryLevel ?? -1)")
+                                print("[\(localTimeString())] 设备状态变化：\(oldDevice.id) Cases电池电量从 \(oldDevice.caseBatteryLevel ?? -1) 变更为 \(newDevice.caseBatteryLevel ?? -1)")
                                 devicesChanged = true
                                 break
                             }
                         } else {
                             // 设备ID不同，说明设备列表发生变化
                             devicesChanged = true
+                            print("[\(localTimeString())] 设备状态变化：\(oldDevice.id) 变更为 \(newDevice.id)")
                             break
                         }
                     }
@@ -953,21 +904,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
         }
     }
     
-    // 开始监听设备电量变化
-    func startBatteryMonitoring() {
-        // 每60秒检查一次电量
-        Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
-            guard let self = self else { return }
-            
-            // 只检查已连接的设备
-            for device in self.devices where device.isConnected {
-                let batteryLevels = self.fetchRealBatteryLevel(for: device)
-                if batteryLevels.caseLevel != nil || batteryLevels.leftLevel != nil || batteryLevels.rightLevel != nil || batteryLevels.generalLevel != nil {
-                    self.updateDeviceBattery(device, caseLevel: batteryLevels.caseLevel, leftLevel: batteryLevels.leftLevel, rightLevel: batteryLevels.rightLevel, generalLevel: batteryLevels.generalLevel)
-                }
-            }
-        }
-    }
+
     
     // 为设备设置连接状态检查
     private func setupConnectionCheckForDevice(_ device: IOBluetoothDevice) {
@@ -1048,8 +985,6 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate {
     }
     
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-
-        
         // 更新设备连接状态
         DispatchQueue.main.async {
             if let index = self.devices.firstIndex(where: { $0.id == peripheral.identifier.uuidString }) {
@@ -1398,26 +1333,7 @@ class StatusBarManager {
                 
                 if let button = deviceStatusItem.button {
                     // 计算设备电量，使用与气泡详情相同的逻辑
-                    var batteryLevel: Int = 0
-                    if device.isAppleDevice {
-                        // 苹果设备的电量计算逻辑
-                        if let leftLevel = device.leftBatteryLevel, let rightLevel = device.rightBatteryLevel {
-                            // 左右耳都有，使用平均值
-                            batteryLevel = (leftLevel + rightLevel) / 2
-                        } else if let leftLevel = device.leftBatteryLevel {
-                            // 只有左耳，使用左耳电量
-                            batteryLevel = leftLevel
-                        } else if let rightLevel = device.rightBatteryLevel {
-                            // 只有右耳，使用右耳电量
-                            batteryLevel = rightLevel
-                        } else {
-                            // 没有电量信息
-                            batteryLevel = 0
-                        }
-                    } else {
-                        // 非苹果设备使用通用电量
-                        batteryLevel = device.batteryLevel ?? 0
-                    }
+                    let batteryLevel = self.calculateBatteryLevel(for: device)
                     
                     // 清除按钮的现有子视图
                     button.subviews.forEach { $0.removeFromSuperview() }
@@ -2066,6 +1982,31 @@ class StatusBarManager {
                 NSApp.sendAction(action, to: target, from: menuItem)
             }
         }
+    }
+    
+    // 计算设备电量的方法
+    private func calculateBatteryLevel(for device: BluetoothDevice) -> Int {
+        var batteryLevel: Int = 0
+        if device.isAppleDevice {
+            // 苹果设备的电量计算逻辑
+            if let leftLevel = device.leftBatteryLevel, let rightLevel = device.rightBatteryLevel {
+                // 左右耳都有，使用平均值
+                batteryLevel = (leftLevel + rightLevel) / 2
+            } else if let leftLevel = device.leftBatteryLevel {
+                // 只有左耳，使用左耳电量
+                batteryLevel = leftLevel
+            } else if let rightLevel = device.rightBatteryLevel {
+                // 只有右耳，使用右耳电量
+                batteryLevel = rightLevel
+            } else {
+                // 没有电量信息
+                batteryLevel = 0
+            }
+        } else {
+            // 非苹果设备使用通用电量
+            batteryLevel = device.batteryLevel ?? 0
+        }
+        return batteryLevel
     }
     
     // 电量圆形指示器视图类
@@ -3323,26 +3264,7 @@ class StatusBarManager {
                     /////////////////////// 添加电量圆形指示器
 
                     // 计算电量值
-                    var batteryLevel: Int = 0
-                    if device.isAppleDevice {
-                        // 苹果设备的电量计算逻辑
-                        if let leftLevel = device.leftBatteryLevel, let rightLevel = device.rightBatteryLevel {
-                            // 左右耳都有，使用平均值
-                            batteryLevel = (leftLevel + rightLevel) / 2
-                        } else if let leftLevel = device.leftBatteryLevel {
-                            // 只有左耳，使用左耳电量
-                            batteryLevel = leftLevel
-                        } else if let rightLevel = device.rightBatteryLevel {
-                            // 只有右耳，使用右耳电量
-                            batteryLevel = rightLevel
-                        } else {
-                            // 没有电量信息
-                            batteryLevel = 0
-                        }
-                    } else {
-                        // 非苹果设备使用通用电量
-                        batteryLevel = device.batteryLevel ?? 0
-                    }
+                    let batteryLevel = self.calculateBatteryLevel(for: device)
                     
                     // 创建电量指示器视图
                     let batteryIndicator = BatteryCircleView(frame: NSRect(x: 220 - 60, y: popoverHeight - currentY - 45, width: 40, height: 40))
@@ -3685,9 +3607,7 @@ class StatusBarManager {
         }
     }
     
-    @objc private func openIconDisplaySettings() {
-        // 打开图标显示设置
-    }
+
     
     @objc private func openSettings() {
         // 打开设置窗口
@@ -4339,7 +4259,7 @@ struct IconDisplaySettingsView: View {
 
 // 缓存机制
 var systemProfilerCache: (data: [String: Any], timestamp: Date)?
-let cacheExpirationInterval: TimeInterval = 15 // 缓存过期时间（秒）
+let cacheExpirationInterval: TimeInterval = 60 * 3 // 缓存过期时间（秒）
 
 // 缓存管理器类
 class CacheManager {
@@ -4347,6 +4267,9 @@ class CacheManager {
     
     // 存储上一次的缓存内容，用于比较是否变化
     private var lastCacheData: [String: Any]?
+    
+    // 标记当前是否正在刷新缓存
+    private var isRefreshing = false
     
     private init() {
         // 启动定期缓存刷新定时器
@@ -4364,6 +4287,17 @@ class CacheManager {
     
     // 异步刷新system_profiler缓存
     func refreshSystemProfilerCache() {
+        // 检查是否正在刷新，如果是则忽略新的刷新请求
+        if isRefreshing {
+            print("[\(localTimeString())] 缓存正在刷新中，忽略新的刷新请求")
+            return
+        }
+        
+        // 标记开始刷新
+        isRefreshing = true
+        let startTime = localTimeString()
+        print("[\(startTime)] 开始刷新system_profiler缓存")
+        
         DispatchQueue.global(qos: .background).async {
             let task = Process()
             task.launchPath = "/usr/sbin/system_profiler"
@@ -4371,6 +4305,18 @@ class CacheManager {
             
             let pipe = Pipe()
             task.standardOutput = pipe
+            
+            // 记录开始时间用于计算耗时
+            let refreshStartTime = Date()
+            
+            // 使用defer确保无论是否发生错误，都会标记刷新完成
+            defer {
+                // 标记刷新完成
+                self.isRefreshing = false
+                let endTime = localTimeString()
+                let elapsedTime = Date().timeIntervalSince(refreshStartTime)
+                print("[\(endTime)] 缓存刷新结束，总耗时: \(String(format: "%.3f", elapsedTime))秒")
+            }
             
             do {
                 try task.run()
@@ -4387,7 +4333,7 @@ class CacheManager {
                                 // 更新缓存
                                 systemProfilerCache = (data: json, timestamp: Date())
                                 self.lastCacheData = json
-                                
+
                                 // 只有当缓存真正变化时，才发送缓存更新通知，触发设备信息更新
                                 if cacheChanged {
                                     print("[\(localTimeString())] 缓存内容发生变化，发送SystemProfilerCacheUpdated通知")
