@@ -2,11 +2,19 @@
 
 # 构建应用的脚本
 
+# 设置默认参数
+BUILD_CONFIG="debug"
+
+# 处理命令行参数
+if [ "$1" == "release" ]; then
+    BUILD_CONFIG="release"
+fi
+
 # 设置变量
 APP_NAME="BtBar"
 VERSION="1.0"
 BUNDLE_ID="com.example.$APP_NAME"
-BUILD_DIR=".build/release"
+BUILD_DIR=".build/$BUILD_CONFIG"
 APP_DIR="$APP_NAME.app"
 
 # 清理旧构建
@@ -15,7 +23,7 @@ rm -rf "$BUILD_DIR"
 rm -rf ".build" # 清理整个.build目录
 
 # 构建应用
-swift build -c release --build-path .build
+swift build -c $BUILD_CONFIG --build-path .build
 
 # 创建应用包结构
 mkdir -p "$APP_DIR/Contents/MacOS"
