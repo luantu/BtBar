@@ -4296,7 +4296,7 @@ class CacheManager {
         // 标记开始刷新
         isRefreshing = true
         let startTime = localTimeString()
-        print("[\(startTime)] 开始刷新system_profiler缓存")
+        print("[\( localTimeString())] 开始刷新system_profiler缓存")
         
         DispatchQueue.global(qos: .background).async {
             let task = Process()
@@ -4313,9 +4313,9 @@ class CacheManager {
             defer {
                 // 标记刷新完成
                 self.isRefreshing = false
-                let endTime = localTimeString()
+
                 let elapsedTime = Date().timeIntervalSince(refreshStartTime)
-                print("[\(endTime)] 缓存刷新结束，总耗时: \(String(format: "%.3f", elapsedTime))秒")
+                print("[\( localTimeString())] 缓存刷新结束，总耗时: \(String(format: "%.3f", elapsedTime))秒")
             }
             
             do {
