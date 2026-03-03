@@ -65,8 +65,20 @@ func writeToLogFile(_ message: String) {
     }
 }
 
+// 音频设备缓存
+private var audioDevicesCache: [(id: AudioDeviceID, name: String)]?
+private var audioCacheTimestamp: Date?
+private let audioCacheExpiration: TimeInterval = 30 // 30秒过期
+
 // 音频设备管理函数
 func getAudioDevices() -> [(id: AudioDeviceID, name: String)] {
+    // 检查缓存
+    if let cache = audioDevicesCache,
+       let timestamp = audioCacheTimestamp,
+       Date().timeIntervalSince(timestamp) < audioCacheExpiration {
+        return cache
+    }
+    
     var devices: [(id: AudioDeviceID, name: String)] = []
     var propertyAddress = AudioObjectPropertyAddress(
         mSelector: kAudioHardwarePropertyDevices,
@@ -100,8 +112,12 @@ func getAudioDevices() -> [(id: AudioDeviceID, name: String)] {
             }
             if result == noErr {
                 devices.append((id: deviceID, name: name as String))
-            }
-        }
+            }        
+    }
+    
+    // 更新缓存
+    audioDevicesCache = devices
+    audioCacheTimestamp = Date()
     
     return devices
 }
@@ -264,6 +280,10 @@ class BluetoothManager: NSObject, ObservableObject {
     private var pairedDevicesCacheTimestamp: Date?
     private let pairedDevicesCacheExpiration: TimeInterval = 3600 // 1小时过期
     
+    // 设备连接状态缓存
+    private var deviceConnectionCache: [String: (isConnected: Bool, timestamp: Date)] = [:]
+    private let connectionCacheExpiration: TimeInterval = 10 // 10秒过期
+    
     // 通知节流
     private var lastNotificationTime: TimeInterval = 0
     private let notificationThrottleInterval: TimeInterval = 5.0 // 5秒节流
@@ -271,6 +291,20 @@ class BluetoothManager: NSObject, ObservableObject {
     override init() {
         super.init()
         setupBluetoothNotifications()
+    }
+    
+    // 使用缓存查询连接状态
+    private func isDeviceConnected(_ device: IOBluetoothDevice) -> Bool {
+        let deviceID = device.addressString ?? device.name ?? "Unknown"
+        // 检查缓存是否有效
+        if let cache = deviceConnectionCache[deviceID],
+           Date().timeIntervalSince(cache.timestamp) < connectionCacheExpiration {
+            return cache.isConnected
+        }
+        // 调用系统 API 并更新缓存
+        let isConnected = device.isConnected()
+        deviceConnectionCache[deviceID] = (isConnected, Date())
+        return isConnected
     }
     
     private func setupBluetoothNotifications() {
@@ -384,26 +418,28 @@ class BluetoothManager: NSObject, ObservableObject {
         // 检查缓存是否存在，如果不存在，同步等待缓存刷新
         if getCachedSystemProfilerData() == nil {
             log("缓存不存在，同步刷新缓存")
-            // 使用DispatchGroup等待缓存刷新完成
-            let group = DispatchGroup()
-            group.enter()
+            let semaphore = DispatchSemaphore(value: 0)
+            var waitTimeout = false
             
-            // 立即刷新缓存
+            // 异步刷新缓存
             CacheManager.shared.refreshSystemProfilerCache()
             
-            // 延迟检查缓存是否刷新完成
-            DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 0.1) { 
-                // 最多等待5秒，直到缓存刷新完成
+            // 后台线程非阻塞等待缓存
+            DispatchQueue.global(qos: .background).async {
                 let startWaitTime = Date()
-                while getCachedSystemProfilerData() == nil && Date().timeIntervalSince(startWaitTime) < 5 {
-                    usleep(100000) // 等待100ms
+                while getCachedSystemProfilerData() == nil,
+                      Date().timeIntervalSince(startWaitTime) < 5 {
+                    // 关键：用 Thread.sleep 替代 usleep，释放 CPU 核心
+                    Thread.sleep(forTimeInterval: 0.1)
                 }
-                group.leave()
+                // 超时判断
+                waitTimeout = Date().timeIntervalSince(startWaitTime) >= 5
+                semaphore.signal()
             }
             
-            // 等待缓存刷新完成
-            _ = group.wait(timeout: .now() + 5)
-            log("**** 同步等待缓存刷新完成或超时")
+            // 等待信号量（最多5秒）
+            _ = semaphore.wait(timeout: .now() + 5)
+            log(waitTimeout ? "缓存刷新等待超时" : "缓存刷新完成")
         }
         
         // 获取已配对的设备（使用缓存）
@@ -437,10 +473,10 @@ class BluetoothManager: NSObject, ObservableObject {
             for existingDevice in devices {
                 if existingDevice.isConnected {
                     let stillConnected = devicesArray.contains { 
-                        let addressString = $0.addressString ?? ""
-                        let deviceID = addressString.isEmpty ? ($0.name ?? "Unknown") : addressString
-                        return deviceID == existingDevice.id && $0.isConnected()
-                    }
+                            let addressString = $0.addressString ?? ""
+                            let deviceID = addressString.isEmpty ? ($0.name ?? "Unknown") : addressString
+                            return deviceID == existingDevice.id && isDeviceConnected($0)
+                        }
                     if !stillConnected {
                         hasDisconnectedDevice = true
                         log("检测到设备断开: \(existingDevice.id)")
@@ -479,7 +515,7 @@ class BluetoothManager: NSObject, ObservableObject {
                 let customIconName = defaults.string(forKey: "customIcon_\(deviceID)")
                 
                 // 检查设备是否已连接
-                let isConnected = bluetoothDevice.isConnected()
+                let isConnected = isDeviceConnected(bluetoothDevice)
                 
                 // 创建蓝牙设备对象
                 // 优先尝试获取真实电量，失败则设置为nil
