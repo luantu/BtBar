@@ -1060,15 +1060,9 @@ class StatusBarManager {
                 let isNowConnected = device.isConnected
                 let justConnected = wasDisconnected && isNowConnected
                 
-                // 如果设备状态没有变化，跳过更新
-                if let lastState = lastState, lastState == currentState {
-                    log("设备状态未变化，跳过更新: \(device.name)")
-                    continue
-                }
-                log("设备状态发生变化，开始更新: \(device.name)")
+                // 检查是否需要显示（即使状态没有变化，也需要确保图标可见）
+                let wasHidden = self.deviceStatusItems[device.id]?.statusItem.button?.isHidden ?? true
                 
-                log("需要显示的设备: \(device.name)")
-
                 let deviceUpdateStartTime = Date()
                 
                 // 更新设备状态
@@ -1128,7 +1122,7 @@ class StatusBarManager {
                     let totalWidth = margin + iconWidth + textWidth + margin
                     
                     // 检查是否需要更新视图
-                    if existingBatteryLabel == nil || existingBatteryLabel?.stringValue != batteryText {
+                    if existingBatteryLabel == nil || existingBatteryLabel?.stringValue != batteryText || wasHidden {
                         needsUpdate = true
                     }
                     
@@ -1239,6 +1233,10 @@ class StatusBarManager {
                             button.addSubview(compositeView)
                         }
                     } else {
+                        // 即使不需要更新视图，也需要确保按钮宽度正确
+                        if wasHidden {
+                            button.frame = NSRect(x: 0, y: 0, width: totalWidth, height: buttonHeight)
+                        }
                         log("设备图标视图无需更新: \(device.name)")
                     }
                     
@@ -1771,7 +1769,7 @@ class StatusBarManager {
         private func setupTrackingArea() {
             let trackingArea = NSTrackingArea(
                 rect: self.bounds,
-                options: [.mouseEnteredAndExited, .activeAlways],
+                options: [.mouseEnteredAndExited, .activeInKeyWindow],
                 owner: self,
                 userInfo: nil
             )
@@ -1921,7 +1919,7 @@ class StatusBarManager {
             // 添加鼠标跟踪区域
             let trackingArea = NSTrackingArea(
                 rect: self.bounds,
-                options: [.mouseEnteredAndExited, .activeAlways, .mouseMoved, .inVisibleRect],
+                options: [.mouseEnteredAndExited, .activeInKeyWindow, .mouseMoved, .inVisibleRect],
                 owner: self,
                 userInfo: nil
             )
@@ -2107,7 +2105,7 @@ class StatusBarManager {
             
             let trackingArea = NSTrackingArea(
                 rect: self.bounds,
-                options: [.mouseEnteredAndExited, .activeAlways, .mouseMoved, .inVisibleRect],
+                options: [.mouseEnteredAndExited, .activeInKeyWindow, .mouseMoved, .inVisibleRect],
                 owner: self,
                 userInfo: nil
             )
@@ -3416,13 +3414,28 @@ class StatusBarManager {
                         }
                     }
                     
+                    // 保存全局鼠标事件监听器的引用
+                    var globalMouseMonitor: Any?
+                    
                     // 添加全局点击监听器，确保点击外部时关闭弹窗
-                    NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak popover] event in
+                    globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak popover] event in
                         if let popover = popover, popover.isShown {
                             // 先隐藏所有tooltip窗口
                             HoverableButton.hideAllTooltips()
                             // 再关闭气泡
                             popover.performClose(nil)
+                            // 移除监听器
+                            if let monitor = globalMouseMonitor {
+                                NSEvent.removeMonitor(monitor)
+                            }
+                        }
+                    }
+                    
+                    // 添加气泡关闭通知监听器，确保在气泡关闭时移除全局鼠标事件监听器
+                    _ = NotificationCenter.default.addObserver(forName: NSPopover.willCloseNotification, object: popover, queue: nil) { [globalMouseMonitor] _ in
+                        // 移除全局鼠标事件监听器
+                        if let monitor = globalMouseMonitor {
+                            NSEvent.removeMonitor(monitor)
                         }
                     }
                 }
