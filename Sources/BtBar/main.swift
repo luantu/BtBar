@@ -332,12 +332,12 @@ class BluetoothManager: NSObject, ObservableObject {
         ) { [weak self] notification in
             
             // 通知节流
-            let currentTime = Date().timeIntervalSince1970
-            if let lastTime = self?.lastNotificationTime, currentTime - lastTime < (self?.notificationThrottleInterval ?? 5.0) {
-                log("通知节流，忽略 IOBluetoothDevicePublished 通知")
-                return
-            }
-            self?.lastNotificationTime = currentTime
+            // let currentTime = Date().timeIntervalSince1970
+            // if let lastTime = self?.lastNotificationTime, currentTime - lastTime < (self?.notificationThrottleInterval ?? 5.0) {
+            //     log("通知节流，忽略 IOBluetoothDevicePublished 通知")
+            //     return
+            // }
+            // self?.lastNotificationTime = currentTime
             
             log("**** ✅ 收到蓝牙相关通知: IOBluetoothDevicePublished")
             let objectDescription = "\((notification.object ?? "nil") as Any)".replacingOccurrences(of: "\n", with: " ")
@@ -381,12 +381,12 @@ class BluetoothManager: NSObject, ObservableObject {
         ) { [weak self] notification in
             
             // 通知节流
-            let currentTime = Date().timeIntervalSince1970
-            if let lastTime = self?.lastNotificationTime, currentTime - lastTime < (self?.notificationThrottleInterval ?? 5.0) {
-                log("通知节流，忽略 IOBluetoothDeviceDestroyed 通知")
-                return
-            }
-            self?.lastNotificationTime = currentTime
+            // let currentTime = Date().timeIntervalSince1970
+            // if let lastTime = self?.lastNotificationTime, currentTime - lastTime < (self?.notificationThrottleInterval ?? 5.0) {
+            //     log("通知节流，忽略 IOBluetoothDeviceDestroyed 通知")
+            //     return
+            // }
+            // self?.lastNotificationTime = currentTime
             
             log("**** 🅾️ 收到蓝牙相关通知: IOBluetoothDeviceDestroyed")
             let objectDescription = "\((notification.object ?? "nil") as Any)".replacingOccurrences(of: "\n", with: " ")
@@ -417,7 +417,6 @@ class BluetoothManager: NSObject, ObservableObject {
         log("retrieveConnectedDevices....")
         // 检查缓存是否存在，如果不存在，同步等待缓存刷新
         if getCachedSystemProfilerData() == nil {
-            log("缓存不存在，同步刷新缓存")
             let semaphore = DispatchSemaphore(value: 0)
             var waitTimeout = false
             
@@ -4142,13 +4141,13 @@ class CacheManager {
     func refreshSystemProfilerCache() {
         // 检查是否正在刷新，如果是则忽略新的刷新请求
         if isRefreshing {
-            log("缓存正在刷新中，忽略新的刷新请求")
+            log("[system_profiler缓存] 缓存正在刷新中，忽略新的刷新请求")
             return
         }
         
         // 标记开始刷新
         isRefreshing = true
-        log("开始刷新system_profiler缓存")
+        log("[system_profiler缓存] 开始刷新")
         
         DispatchQueue.global(qos: .background).async {
             let task = Process()
@@ -4167,7 +4166,7 @@ class CacheManager {
                 self.isRefreshing = false
 
                 let elapsedTime = Date().timeIntervalSince(refreshStartTime)
-                log("缓存刷新结束，总耗时: \(String(format: "%.3f", elapsedTime))秒")
+                log("[system_profiler缓存] 缓存刷新结束，总耗时: \(String(format: "%.3f", elapsedTime))秒")
             }
             
             do {
@@ -4196,12 +4195,12 @@ class CacheManager {
                                 }
                             }
                         } catch {
-                            log("Error parsing system_profiler JSON: \(error)")
+                            log("[system_profiler缓存] Error parsing system_profiler JSON: \(error)")
                         }
                     }
                 }
             } catch {
-                log("Error running system_profiler: \(error)")
+                log("[system_profiler缓存] Error running system_profiler: \(error)")
             }
         }
     }
@@ -4286,7 +4285,7 @@ class CacheManager {
         }
         
         // 缓存不存在，返回nil，并在后台异步刷新缓存
-        log("缓存不存在，返回nil并在后台刷新缓存")
+        log("[system_profiler缓存] 缓存不存在，返回nil并在后台刷新缓存")
         
         // 在后台线程异步刷新缓存
         DispatchQueue.global(qos: .background).async {
@@ -4312,11 +4311,10 @@ class CacheManager {
                                 // 更新缓存
                                 systemProfilerCache = (data: json, timestamp: Date())
                                 self.lastCacheData = json
-                                log("***** 后台缓存刷新完成 *****")
                                 
                                 // 只有当缓存真正变化时，才发送缓存更新通知，触发设备信息更新
                                 if cacheChanged {
-                                    log("缓存内容发生变化，发送BtBarCacheUpdated通知")
+                                    log("[system_profiler缓存] 缓存内容发生变化，发送BtBarCacheUpdated通知")
                                     NotificationCenter.default.post(
                                         name: Notification.Name("BtBarCacheUpdated"),
                                         object: self
@@ -4324,12 +4322,12 @@ class CacheManager {
                                 }
                             }
                         } catch {
-                            log("Error parsing system_profiler JSON: \(error)")
+                            log("[system_profiler缓存] Error parsing system_profiler JSON: \(error)")
                         }
                     }
                 }
             } catch {
-                log("Error running system_profiler: \(error)")
+                log("[system_profiler缓存] Error running system_profiler: \(error)")
             }
         }
         
