@@ -273,16 +273,17 @@ struct BluetoothDevice: Identifiable, Hashable {
 
 // 蓝牙管理器
 class BluetoothManager: NSObject, ObservableObject {
-    @Published var devices: [BluetoothDevice] = []
+    @Published var g_devices: [BluetoothDevice] = []
     
     // 已配对设备的缓存
     private var pairedDevicesCache: [IOBluetoothDevice]?
     private var pairedDevicesCacheTimestamp: Date?
-    private let pairedDevicesCacheExpiration: TimeInterval = 3600 // 1小时过期
+    private let pairedDevicesCacheExpiration: TimeInterval = 3600 * 24 // 1小时过期
     
     // 设备连接状态缓存
     private var deviceConnectionCache: [String: (isConnected: Bool, timestamp: Date)] = [:]
     private let connectionCacheExpiration: TimeInterval = 10 // 10秒过期
+    private let deviceConnectionCacheLock = NSLock()
     
     // 通知节流
     private var lastNotificationTime: TimeInterval = 0
@@ -296,14 +297,24 @@ class BluetoothManager: NSObject, ObservableObject {
     // 使用缓存查询连接状态
     private func isDeviceConnected(_ device: IOBluetoothDevice) -> Bool {
         let deviceID = device.addressString ?? device.name ?? "Unknown"
-        // 检查缓存是否有效
-        if let cache = deviceConnectionCache[deviceID],
-           Date().timeIntervalSince(cache.timestamp) < connectionCacheExpiration {
-            return cache.isConnected
-        }
-        // 调用系统 API 并更新缓存
+        
+        // 读取缓存时加锁
+        // deviceConnectionCacheLock.lock()
+        // if let cache = deviceConnectionCache[deviceID],
+        //    Date().timeIntervalSince(cache.timestamp) < connectionCacheExpiration {
+        //     deviceConnectionCacheLock.unlock()
+        //     return cache.isConnected
+        // }
+        // deviceConnectionCacheLock.unlock()
+        
+        // 调用系统 API
         let isConnected = device.isConnected()
+        
+        // 更新缓存时加锁
+        deviceConnectionCacheLock.lock()
         deviceConnectionCache[deviceID] = (isConnected, Date())
+        deviceConnectionCacheLock.unlock()
+        
         return isConnected
     }
     
@@ -351,7 +362,7 @@ class BluetoothManager: NSObject, ObservableObject {
                 let deviceID = deviceAddress.isEmpty ? (bluetoothDevice.name ?? "Unknown") : deviceAddress
                 
                 // 检查设备在 BtBar 程序中是否已经标记为已连接
-                let isDeviceAlreadyConnectedInApp = self?.devices.contains { device in
+                let isDeviceAlreadyConnectedInApp = self?.g_devices.contains { device in
                     device.id == deviceID && device.isConnected
                 } ?? false
                 
@@ -363,7 +374,7 @@ class BluetoothManager: NSObject, ObservableObject {
                 // 只有当设备在 BtBar 程序中未标记为已连接时，才处理通知
                 // 这样可以避免重复处理已经处理过的设备上线事件
                 if !isDeviceAlreadyConnectedInApp {
-                    log("✅ 设备在未连接，处理 IOBluetoothDevicePublished 通知")
+                    log("✅ 设备尚未连接，处理 IOBluetoothDevicePublished 通知")
                     self?.retrieveConnectedDevices()
                 }
             } else {
@@ -415,61 +426,50 @@ class BluetoothManager: NSObject, ObservableObject {
     
     public func retrieveConnectedDevices(completion: (() -> Void)? = nil) {
         log("retrieveConnectedDevices....")
-        // 检查缓存是否存在，如果不存在，同步等待缓存刷新
-        if getCachedSystemProfilerData() == nil {
-            let semaphore = DispatchSemaphore(value: 0)
-            var waitTimeout = false
-            
-            // 异步刷新缓存
-            CacheManager.shared.refreshSystemProfilerCache()
-            
-            // 后台线程非阻塞等待缓存
-            DispatchQueue.global(qos: .background).async {
-                let startWaitTime = Date()
-                while getCachedSystemProfilerData() == nil,
-                      Date().timeIntervalSince(startWaitTime) < 5 {
-                    // 关键：用 Thread.sleep 替代 usleep，释放 CPU 核心
-                    Thread.sleep(forTimeInterval: 0.1)
-                }
-                // 超时判断
-                waitTimeout = Date().timeIntervalSince(startWaitTime) >= 5
-                semaphore.signal()
-            }
-            
-            // 等待信号量（最多5秒）
-            _ = semaphore.wait(timeout: .now() + 5)
-            log(waitTimeout ? "缓存刷新等待超时" : "缓存刷新完成")
-        }
-        
+
         // 获取已配对的设备（使用缓存）
         let devicesArray: [IOBluetoothDevice]?
         
-        // 检查缓存是否有效
-        if let cachedDevices = pairedDevicesCache, let timestamp = pairedDevicesCacheTimestamp, Date().timeIntervalSince(timestamp) < pairedDevicesCacheExpiration {
-            log("使用缓存的已配对设备列表")
+        // 只要有缓存就使用缓存
+        if let cachedDevices = pairedDevicesCache {
+            log("[设备缓存] 使用缓存的已配对设备列表")
             devicesArray = cachedDevices
+            
+            // 检查缓存是否过期，如果过期则在后台触发刷新
+            if let timestamp = pairedDevicesCacheTimestamp, Date().timeIntervalSince(timestamp) >= pairedDevicesCacheExpiration {
+                log("[设备缓存] 缓存已过期，在后台刷新")
+                // 在后台线程刷新缓存
+                DispatchQueue.global(qos: .background).async {
+                    let newDevices = IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice]
+                    if let devices = newDevices {
+                        self.pairedDevicesCache = devices
+                        self.pairedDevicesCacheTimestamp = Date()
+                        log("[设备缓存] 已在后台更新已配对设备缓存，共 \(devices.count) 个设备")
+                    }
+                }
+            }
         } else {
-            // 缓存无效，重新获取设备列表
-            log("缓存过期或不存在，重新获取已配对设备列表")
+            // 没有缓存，同步获取设备列表
+            log("[设备缓存] 没有缓存，获取已配对设备列表")
             devicesArray = IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice]
             
             // 更新缓存
             if let devices = devicesArray {
                 pairedDevicesCache = devices
                 pairedDevicesCacheTimestamp = Date()
-                log("已更新已配对设备缓存，共 \(devices.count) 个设备")
+                log("[设备缓存] 已更新已配对设备缓存，共 \(devices.count) 个设备")
             }
         }
         
         if let devicesArray = devicesArray {
-            
+            log("[设备缓存] 共 \(devicesArray.count) 个已配对设备")
             // 保存已配对设备的ID，用于后续过滤
             var pairedDeviceIDs: Set<String> = []
             var newDevices: [BluetoothDevice] = []
             
             // 检查是否有设备断开连接
             var hasDisconnectedDevice = false
-            for existingDevice in devices {
+            for existingDevice in g_devices {
                 if existingDevice.isConnected {
                     let stillConnected = devicesArray.contains { 
                             let addressString = $0.addressString ?? ""
@@ -483,7 +483,8 @@ class BluetoothManager: NSObject, ObservableObject {
                     }
                 }
             }
-            
+            log("\(hasDisconnectedDevice ? "有" : "无") 设备断开")
+
             for (_, bluetoothDevice) in devicesArray.enumerated() {
                 let deviceName = bluetoothDevice.name ?? "Unknown"
                 
@@ -522,22 +523,56 @@ class BluetoothManager: NSObject, ObservableObject {
                 var caseBatteryLevel: Int? = nil
                 var leftBatteryLevel: Int? = nil
                 var rightBatteryLevel: Int? = nil
-                
+
+                // 尝试获取真实电量
+                let tempDevice = BluetoothDevice(
+                    id: deviceID,
+                    name: finalDeviceName,
+                    macAddress: addressString.isEmpty ? deviceID : addressString,
+                    isConnected: isConnected,
+                    batteryLevel: nil,
+                    caseBatteryLevel: nil,
+                    leftBatteryLevel: nil,
+                    rightBatteryLevel: nil,
+                    defaultIconName: "bluetooth",
+                    customIconName: customIconName
+                )
+
                 // 只有已连接的设备才尝试获取电量信息，并且不是设备断开的情况
                 if isConnected && !hasDisconnectedDevice {
-                    // 尝试获取真实电量
-                    let tempDevice = BluetoothDevice(
-                        id: deviceID,
-                        name: finalDeviceName,
-                        macAddress: addressString.isEmpty ? deviceID : addressString,
-                        isConnected: isConnected,
-                        batteryLevel: nil,
-                        caseBatteryLevel: nil,
-                        leftBatteryLevel: nil,
-                        rightBatteryLevel: nil,
-                        defaultIconName: "bluetooth",
-                        customIconName: customIconName
-                    )
+                    log("设备ID \(tempDevice.id) 已连接，尝试获取电量")
+                    // 缓存不为空，但是缓存内该设备的电量为nil，需要刷新缓存
+                    if getCachedSystemProfilerData() != nil {
+                         // 先获取一遍真实电量
+                        let batteryLevels = fetchRealBatteryLevel(for: tempDevice)
+                            if batteryLevels.generalLevel == nil {
+                                let semaphore = DispatchSemaphore(value: 0)
+                                var waitTimeout = false
+                                
+                                // 刷新缓存
+                                CacheManager.shared.refreshSystemProfilerCache()
+                                
+                                // 后台线程非阻塞等待缓存
+                                DispatchQueue.global(qos: .background).async {
+                                    let startWaitTime = Date()
+                                    var batteryLevels = self.fetchRealBatteryLevel(for: tempDevice)
+                                    while getCachedSystemProfilerData() == nil,
+                                        Date().timeIntervalSince(startWaitTime) < 5,
+                                        batteryLevels.generalLevel == nil {
+                                        // 关键：用 Thread.sleep 替代 usleep，释放 CPU 核心
+                                        batteryLevels = self.fetchRealBatteryLevel(for: tempDevice)
+                                        Thread.sleep(forTimeInterval: 0.1)
+                                    }
+                                    // 超时判断
+                                    waitTimeout = Date().timeIntervalSince(startWaitTime) >= 5
+                                    semaphore.signal()
+                                }
+                                
+                                // 等待信号量（最多5秒）
+                                _ = semaphore.wait(timeout: .now() + 5)
+                                log(waitTimeout ? "[system_profiler缓存] 缓存刷新等待超时" : "[system_profiler缓存] 缓存刷新完成，当前电量为 \(batteryLevels)")
+                            }
+                    }
                     
                     // 直接获取电量，因为缓存已经确保存在
                     let batteryLevels = fetchRealBatteryLevel(for: tempDevice)
@@ -577,11 +612,11 @@ class BluetoothManager: NSObject, ObservableObject {
                 
                 // 检查设备列表是否真正发生变化
                 var devicesChanged = false
-                if self.devices.count != newDevices.count {
+                if self.g_devices.count != newDevices.count {
                     devicesChanged = true
                 } else {
                     // 设备数量相同，检查每个设备的状态是否变化
-                    for (oldDevice, newDevice) in zip(self.devices, newDevices) {
+                    for (oldDevice, newDevice) in zip(self.g_devices, newDevices) {
                         if oldDevice.id == newDevice.id {
                             // 检查设备状态是否变化
                             if oldDevice.isConnected != newDevice.isConnected ||
@@ -607,14 +642,14 @@ class BluetoothManager: NSObject, ObservableObject {
                 }
                 
                 // 更新设备列表
-                self.devices = newDevices
+                self.g_devices = newDevices
                 
                 // 立即触发StatusBarManager的updateStatusItems方法，确保状态栏图标立即更新
                 let appDelegate = NSApplication.shared.delegate as? AppDelegate
                 let statusBarManager = appDelegate?.statusBarManager
                 
                 if let statusBarManager = statusBarManager {
-                    statusBarManager.updateStatusItems(devices: self.devices)
+                    statusBarManager.updateStatusItems(devices: self.g_devices)
                 }
                 
                 // 只有当设备信息真正变化时才发送通知
@@ -623,7 +658,7 @@ class BluetoothManager: NSObject, ObservableObject {
                     NotificationCenter.default.post(
                         name: Notification.Name("BtBarDevicesUpdate"),
                         object: self,
-                        userInfo: ["devices": self.devices]
+                        userInfo: ["devices": self.g_devices]
                     )
                     log("设备信息发生变化，发送BtBarDevicesUpdate通知")
                 }
@@ -636,16 +671,16 @@ class BluetoothManager: NSObject, ObservableObject {
             DispatchQueue.main.async {
                 
                 // 检查设备列表是否真正发生变化
-                let devicesChanged = !self.devices.isEmpty
+                let devicesChanged = !self.g_devices.isEmpty
                 
-                self.devices.removeAll()
+                self.g_devices.removeAll()
                 
                 // 立即触发StatusBarManager的updateStatusItems方法，确保状态栏图标立即更新
                 let appDelegate = NSApplication.shared.delegate as? AppDelegate
                 let statusBarManager = appDelegate?.statusBarManager
                 
                 if let statusBarManager = statusBarManager {
-                    statusBarManager.updateStatusItems(devices: self.devices)
+                    statusBarManager.updateStatusItems(devices: self.g_devices)
                 }
                 
                 // 当设备信息真正变化时才发送通知
@@ -654,7 +689,7 @@ class BluetoothManager: NSObject, ObservableObject {
                     NotificationCenter.default.post(
                         name: Notification.Name("BtBarDevicesUpdate"),
                         object: self,
-                        userInfo: ["devices": self.devices]
+                        userInfo: ["devices": self.g_devices]
                     )
                     log("设备信息发生变化，发送BtBarDevicesUpdate通知")
                 }
@@ -695,7 +730,7 @@ class BluetoothManager: NSObject, ObservableObject {
                 guard let self = self else { return }
                 
                 // 检查设备是否仍然未连接
-                if let index = self.devices.firstIndex(where: { $0.id == device.id }), !self.devices[index].isConnected {
+                if let index = self.g_devices.firstIndex(where: { $0.id == device.id }), !self.g_devices[index].isConnected {
                     log("Connection timeout for device: \(device.name)")
                     
                     // 尝试重新连接
@@ -745,8 +780,8 @@ class BluetoothManager: NSObject, ObservableObject {
     
     func updateDeviceCustomIcon(_ device: BluetoothDevice, iconName: String?) {
         // 更新设备的自定义图标
-        if let index = devices.firstIndex(where: { $0.id == device.id }) {
-            devices[index].customIconName = iconName
+        if let index = g_devices.firstIndex(where: { $0.id == device.id }) {
+            g_devices[index].customIconName = iconName
             
             // 持久化存储设备的自定义图标路径
             let defaults = UserDefaults.standard
@@ -761,8 +796,8 @@ class BluetoothManager: NSObject, ObservableObject {
     
     func updateDeviceName(_ device: BluetoothDevice, newName: String) {
         // 更新设备的名称
-        if let index = devices.firstIndex(where: { $0.id == device.id }) {
-            devices[index].name = newName
+        if let index = g_devices.firstIndex(where: { $0.id == device.id }) {
+            g_devices[index].name = newName
         }
     }
     
@@ -928,7 +963,7 @@ class StatusBarManager {
         NotificationCenter.default.addObserver(self, selector: #selector(reloadDisplaySettings), name: NSNotification.Name("DeviceDisplaySettingsChanged"), object: nil)
         
         // 监听设备变化
-        bluetoothManager.$devices.sink {[weak self] devices in
+        bluetoothManager.$g_devices.sink {[weak self] devices in
             self?.updateStatusItems(devices: devices)
         }
         .store(in: &cancellables)
@@ -946,7 +981,7 @@ class StatusBarManager {
             } else {
                 log("No devices found in notification userInfo")
                 // 直接使用蓝牙管理器的设备列表
-                self?.updateStatusItems(devices: self?.bluetoothManager.devices ?? [])
+                self?.updateStatusItems(devices: self?.bluetoothManager.g_devices ?? [])
             }
             log("Status bar update completed")
         }
@@ -954,7 +989,7 @@ class StatusBarManager {
     
     @objc private func reloadDisplaySettings() {
         loadDeviceDisplaySettings()
-        updateStatusItems(devices: bluetoothManager.devices)
+        updateStatusItems(devices: bluetoothManager.g_devices)
         log("Display settings reloaded")
     }
     
@@ -1273,7 +1308,7 @@ class StatusBarManager {
                             DispatchQueue.global(qos: .background).async {
                                 while !hasBatteryInfo && Date().timeIntervalSince(startWaitTime) < 3 {
                                     // 再次获取设备信息
-                                    let updatedDevices = self.bluetoothManager.devices
+                                    let updatedDevices = self.bluetoothManager.g_devices
                                     if let updatedDevice = updatedDevices.first(where: { $0.id == device.id }) {
                                         if updatedDevice.batteryLevel != nil || updatedDevice.leftBatteryLevel != nil || updatedDevice.rightBatteryLevel != nil {
                                             hasBatteryInfo = true
@@ -1494,7 +1529,7 @@ class StatusBarManager {
         _ = getCachedSystemProfilerData()
         
         // 直接使用IOBluetoothDevice的isConnected()方法来检查设备的实时连接状态
-        // 这样可以确保获取到最新的设备连接状态，而不依赖于bluetoothManager.devices中的缓存状态
+        // 这样可以确保获取到最新的设备连接状态，而不依赖于bluetoothManager.g_devices中的缓存状态
         if let devicesArray = IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice] {
 
             
@@ -1641,7 +1676,7 @@ class StatusBarManager {
                 // 添加鼠标跟踪区域
                 let trackingArea = NSTrackingArea(
                     rect: quitButton.bounds,
-                    options: [.mouseEnteredAndExited, .activeAlways],
+                    options: [.mouseEnteredAndExited, .activeInKeyWindow],
                     owner: quitButton,
                     userInfo: nil
                 )
@@ -1666,7 +1701,7 @@ class StatusBarManager {
                 menu.popUp(positioning: nil, at: NSPoint(x: -20, y: 10), in: nil)
             }
             
-            // 同时更新bluetoothManager.devices，确保其他地方也能获取到最新的设备状态
+            // 同时更新bluetoothManager.g_devices，确保其他地方也能获取到最新的设备状态
             // bluetoothManager.retrieveConnectedDevices()
 
         } else {
@@ -1718,7 +1753,7 @@ class StatusBarManager {
                 // 添加鼠标跟踪区域
                 let trackingArea = NSTrackingArea(
                     rect: quitButton.bounds,
-                    options: [.mouseEnteredAndExited, .activeAlways],
+                    options: [.mouseEnteredAndExited, .activeInKeyWindow],
                     owner: quitButton,
                     userInfo: nil
                 )
@@ -1746,7 +1781,7 @@ class StatusBarManager {
                 menu.popUp(positioning: nil, at: NSPoint(x: -20, y: 10), in: nil)
             }
             
-            // 同时更新bluetoothManager.devices，确保其他地方也能获取到最新的设备状态
+            // 同时更新bluetoothManager.g_devices，确保其他地方也能获取到最新的设备状态
             // bluetoothManager.retrieveConnectedDevices()
         }
     }
@@ -2194,7 +2229,7 @@ class StatusBarManager {
         // 添加鼠标悬停效果的跟踪区域
         let trackingArea = NSTrackingArea(
             rect: deviceView.bounds,
-            options: [.mouseEnteredAndExited, .activeAlways],
+            options: [.mouseEnteredAndExited, .activeInKeyWindow],
             owner: deviceView,
             userInfo: nil
         )
@@ -2474,7 +2509,7 @@ class StatusBarManager {
                         saveDeviceDisplaySettings()
                         
                         // 更新状态栏图标
-                        updateStatusItems(devices: bluetoothManager.devices)
+                        updateStatusItems(devices: bluetoothManager.g_devices)
                         
                         // 显示成功消息
                         showSuccessAlert(title: "Success", message: "Icon updated successfully for \(device.name)")
@@ -2491,7 +2526,7 @@ class StatusBarManager {
                     saveDeviceDisplaySettings()
                     
                     // 更新状态栏图标
-                    updateStatusItems(devices: bluetoothManager.devices)
+                    updateStatusItems(devices: bluetoothManager.g_devices)
                     
                     // 显示成功消息
                     showSuccessAlert(title: "Success", message: "Icon reset to default for \(device.name)")
@@ -2677,7 +2712,7 @@ class StatusBarManager {
         if let device = sender.representedObject as? BluetoothDevice {
             let currentValue = showDeviceIcons[device.id] ?? true
             showDeviceIcons[device.id] = !currentValue
-            updateStatusItems(devices: bluetoothManager.devices)
+            updateStatusItems(devices: bluetoothManager.g_devices)
             saveDeviceDisplaySettings()
         }
     }
@@ -2753,7 +2788,7 @@ class StatusBarManager {
             // 监听BtBarDevicesUpdate通知
             observerRef = notificationCenter.addObserver(forName: Notification.Name("BtBarDevicesUpdate"), object: nil, queue: nil) { [weak self, weak observerRef] notification in
                 // 检查设备状态是否变化
-                if let updatedDevice = self?.bluetoothManager.devices.first(where: { $0.id == device.id }) {
+                if let updatedDevice = self?.bluetoothManager.g_devices.first(where: { $0.id == device.id }) {
                     if updatedDevice.isConnected != device.isConnected {
                         // 设备状态已变化，更新菜单
                         self?.hideLoadingOverlay()
@@ -2812,8 +2847,8 @@ class StatusBarManager {
         
         // 获取设备的最新状态
         var updatedDevice = device
-        if let index = bluetoothManager.devices.firstIndex(where: { $0.id == device.id }) {
-            updatedDevice = bluetoothManager.devices[index]
+        if let index = bluetoothManager.g_devices.firstIndex(where: { $0.id == device.id }) {
+            updatedDevice = bluetoothManager.g_devices[index]
         }
         
         // 获取subMenu
@@ -3028,7 +3063,7 @@ class StatusBarManager {
                     
                     // 创建新的气泡
                     let popover = NSPopover()
-                    popover.behavior = .transient // 点击外部时自动关闭
+                    popover.behavior = .semitransient // 点击外部时自动关闭，更适合与状态栏图标配合
                     // 增加气泡高度，以容纳底部的操作按钮
                     let popoverHeight = 160.0 
                     popover.contentSize = NSSize(width: 220, height: popoverHeight) // 调整尺寸以适应电池图标和操作按钮
@@ -3413,28 +3448,41 @@ class StatusBarManager {
                         }
                     }
                     
-                    // 保存全局鼠标事件监听器的引用
-                    var globalMouseMonitor: Any?
-                    
                     // 添加全局点击监听器，确保点击外部时关闭弹窗
-                    globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak popover] event in
+                    let mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak popover] event in
                         if let popover = popover, popover.isShown {
-                            // 先隐藏所有tooltip窗口
-                            HoverableButton.hideAllTooltips()
-                            // 再关闭气泡
-                            popover.performClose(nil)
-                            // 移除监听器
-                            if let monitor = globalMouseMonitor {
-                                NSEvent.removeMonitor(monitor)
+                            // 检查点击位置是否在 popover 窗口内
+                            if let popoverWindow = popover.contentViewController?.view.window {
+                                let popoverFrame = popoverWindow.frame
+                                let mouseLocation = NSEvent.mouseLocation
+                                
+                                // 注意：NSEvent.mouseLocation 的 y 坐标是从屏幕底部开始计算的，而 popoverFrame 的 y 坐标是从屏幕顶部开始计算的
+                                // 所以需要转换坐标系统
+                                let screenHeight = NSScreen.main?.frame.height ?? 0
+                                let convertedMouseLocation = NSPoint(x: mouseLocation.x, y: screenHeight - mouseLocation.y)
+                                
+                                // 如果点击位置不在 popover 窗口内，关闭 popover
+                                if !popoverFrame.contains(convertedMouseLocation) {
+                                    // 先隐藏所有tooltip窗口
+                                    HoverableButton.hideAllTooltips()
+                                    // 再关闭气泡
+                                    popover.performClose(nil)
+                                }
                             }
                         }
                     }
                     
-                    // 添加气泡关闭通知监听器，确保在气泡关闭时移除全局鼠标事件监听器
-                    _ = NotificationCenter.default.addObserver(forName: NSPopover.willCloseNotification, object: popover, queue: nil) { [globalMouseMonitor] _ in
-                        // 移除全局鼠标事件监听器
-                        if let monitor = globalMouseMonitor {
+                    // 添加气泡关闭通知监听器，确保在气泡关闭时隐藏所有tooltip窗口并移除鼠标监听器
+                    _ = NotificationCenter.default.addObserver(forName: NSPopover.willCloseNotification, object: popover, queue: nil) { [weak popover, mouseMonitor] _ in
+                        // 隐藏所有tooltip窗口
+                        HoverableButton.hideAllTooltips()
+                        // 移除鼠标监听器
+                        if let monitor = mouseMonitor {
                             NSEvent.removeMonitor(monitor)
+                        }
+                        // 移除通知监听器本身
+                        if let popover = popover {
+                            NotificationCenter.default.removeObserver(self, name: NSPopover.willCloseNotification, object: popover)
                         }
                     }
                 }
@@ -3666,7 +3714,7 @@ struct SettingsView: View {
                 // 设备列表
                 ScrollView {
                     VStack(spacing: 16) {
-                        ForEach(bluetoothManager.devices) {
+                        ForEach(bluetoothManager.g_devices) {
                             device in
                             DeviceCard(device: device)
                                 .padding(.horizontal)
@@ -3936,7 +3984,7 @@ struct IconManagementView: View {
             // 设备选择
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
-                    ForEach(bluetoothManager.devices.filter { $0.isConnected }) {
+                    ForEach(bluetoothManager.g_devices.filter { $0.isConnected }) {
                         device in
                         Button(action: {
                             selectedDevice = device
@@ -4007,7 +4055,7 @@ struct IconManagementView: View {
                     .padding()
                 }
             } else {
-                let connectedDevices = bluetoothManager.devices.filter { $0.isConnected }
+                let connectedDevices = bluetoothManager.g_devices.filter { $0.isConnected }
                 if connectedDevices.isEmpty {
                     Text("No connected devices available")
                         .font(.subheadline)
@@ -4038,7 +4086,7 @@ struct IconDisplaySettingsView: View {
             
             ScrollView {
                 VStack(spacing: 12) {
-                    ForEach(bluetoothManager.devices) {
+                    ForEach(bluetoothManager.g_devices) {
                         device in
                         HStack {
                             Image(systemName: device.iconName)
