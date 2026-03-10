@@ -1071,7 +1071,7 @@ class StatusBarManager {
                     // 隐藏状态栏图标并将宽度设置为0，避免出现空白
                     if let button = deviceInfo.statusItem.button {
                         button.isHidden = true
-                        button.frame = NSRect(x: 0, y: 0, width: 0, height: button.frame.height)
+                        button.frame = NSRect(x: 0, y: 0, width: 0, height: 0)
                         log("隐藏不需要显示的设备图标: \(deviceInfo.device.name)")
                     }
                     // 更新设备状态为断开连接
@@ -1119,158 +1119,89 @@ class StatusBarManager {
                     // 计算设备电量，使用与气泡详情相同的逻辑
                     let batteryLevel = self.calculateBatteryLevel(for: device)
                     
+                    // 计算电量文本
+                    let batteryText = "\(batteryLevel)%"
+                    
                     // 检查是否需要更新视图
                     var needsUpdate = false
-                    var existingCompositeView: NSView? = nil
-                    var existingBatteryLabel: NSTextField? = nil
                     
-                    // 检查是否已有复合视图
-                    if button.subviews.count > 0 {
-                        existingCompositeView = button.subviews.first
-                        if let compositeView = existingCompositeView {
-                            // 查找现有的电量标签
-                            for subview in compositeView.subviews {
-                                if subview is NSTextField {
-                                    existingBatteryLabel = subview as? NSTextField
-                                }
-                            }
-                        }
-                    }
-                    
-                    // 计算电量文本宽度
-                    let batteryText = "\(batteryLevel)%"
-                    let textAttributes: [NSAttributedString.Key: Any] = [
-                        .font: NSFont.systemFont(ofSize: 12),
-                        .foregroundColor: NSColor.controlTextColor
-                    ]
-                    let attributedText = NSAttributedString(string: batteryText, attributes: textAttributes)
-                    let textSize = attributedText.size()
-                    let textWidth = textSize.width + 5 // 增加一些边距
-                    
-                    // 左右边距
-                    let margin: CGFloat = 5
-                    let iconWidth: CGFloat = 24
-                    let buttonHeight: CGFloat = 26
-                    
-                    // 计算总宽度
-                    let totalWidth = margin + iconWidth + textWidth + margin
-                    
-                    // 检查是否需要更新视图
-                    if existingBatteryLabel == nil || existingBatteryLabel?.stringValue != batteryText || wasHidden {
+                    // 检查是否需要更新
+                    if wasHidden {
                         needsUpdate = true
+                    } else {
+                        // 检查当前图像是否需要更新
+                        needsUpdate = true // 简化逻辑，每次都更新
                     }
                     
                     if needsUpdate {
                         log("更新设备图标视图: \(device.name)")
                         
-                        // 检查是否已有复合视图
-                        var compositeView: NSView
-                        var iconView: NSImageView?
-                        var batteryLabel: NSTextField?
+                        // 左右边距
+                        let margin: CGFloat = 5
+                        let iconWidth: CGFloat = 24
+                        let buttonHeight: CGFloat = 26
                         
-                        if let existingCompositeView = existingCompositeView {
-                            // 复用现有视图
-                            compositeView = existingCompositeView
-                            
-                            // 查找现有图标视图和电量标签
-                            for subview in compositeView.subviews {
-                                if subview is NSImageView {
-                                    iconView = subview as? NSImageView
-                                } else if subview is NSTextField {
-                                    batteryLabel = subview as? NSTextField
-                                }
-                            }
+                        // 计算电量文本宽度
+                        let textAttributes: [NSAttributedString.Key: Any] = [
+                            .font: NSFont.systemFont(ofSize: 12),
+                            .foregroundColor: NSColor.controlTextColor
+                        ]
+                        let attributedText = NSAttributedString(string: batteryText, attributes: textAttributes)
+                        let textSize = attributedText.size()
+                        let textWidth = textSize.width + 5 // 增加一些边距
+                        
+                        // 计算实际内容宽度，自适应设备图标+标签的宽度，减小右侧空白3个单位
+                        let adjustedMargin = margin - 5
+                        let actualContentWidth = margin + iconWidth + 2 + textWidth + adjustedMargin
+                        let totalWidth = actualContentWidth
+                        
+                        // 创建合成图像
+                        let compositeImage = NSImage(size: NSSize(width: totalWidth, height: buttonHeight))
+                        compositeImage.lockFocus()
+                        
+                        // 绘制图标
+                        if let deviceIcon = self.getDeviceIcon(for: device, size: NSSize(width: iconWidth, height: iconWidth), applyTemplate: true) {
+                            // 调整图标大小，确保高度为18，宽度保持原始横纵比
+                            let desiredIconHeight: CGFloat = 18
+                            let scale = desiredIconHeight / deviceIcon.size.height
+                            let scaledWidth = deviceIcon.size.width * scale
+                            let scaledHeight = desiredIconHeight
+                            // 计算图标位置，确保水平居中
+                            let iconX = margin + (iconWidth - scaledWidth) / 2
+                            // 计算图标Y位置，确保与文字中心对齐
+                            let iconY = (buttonHeight - scaledHeight) / 2
+                            deviceIcon.draw(in: NSRect(x: iconX, y: iconY, width: scaledWidth, height: scaledHeight))
                         } else {
-                            // 创建新的复合视图
-                            compositeView = NSView(frame: NSRect(x: 0, y: 0, width: totalWidth, height: buttonHeight))
+                            // 如果所有图标都不可用，使用随机图标
+                            let randomIcon = self.generateRandomIcon()
+                            randomIcon.isTemplate = true
+                            // 调整图标大小，确保高度为18，宽度保持原始横纵比
+                            let desiredIconHeight: CGFloat = 18
+                            let scale = desiredIconHeight / randomIcon.size.height
+                            let scaledWidth = randomIcon.size.width * scale
+                            let scaledHeight = desiredIconHeight
+                            // 计算图标位置，确保水平居中
+                            let iconX = margin + (iconWidth - scaledWidth) / 2
+                            // 计算图标Y位置，确保与文字中心对齐
+                            let iconY = (buttonHeight - scaledHeight) / 2
+                            randomIcon.draw(in: NSRect(x: iconX, y: iconY, width: scaledWidth, height: scaledHeight))
                         }
                         
-                        // 更新复合视图大小
-                        compositeView.frame = NSRect(x: 0, y: 0, width: totalWidth, height: buttonHeight)
+                        // 绘制电量文本，确保与图标中心对齐，增加间距2个单位
+                        let textY = (buttonHeight - textSize.height) / 2
+                        attributedText.draw(at: NSPoint(x: margin + iconWidth + 2, y: textY))
                         
-                        // 处理图标
-                        if iconView == nil {
-                            // 创建新的图标视图
-                            if let deviceIcon = self.getDeviceIcon(for: device, size: NSSize(width: iconWidth, height: iconWidth), applyTemplate: true) {
-                                // 获取实际图标高度
-                                let actualIconHeight = deviceIcon.size.height
-                                // 计算图标在复合视图中上下居中的位置
-                                let iconY = (buttonHeight - actualIconHeight) / 2
-                                iconView = NSImageView(frame: NSRect(x: margin, y: iconY + 2, width: iconWidth, height: actualIconHeight))
-                                iconView?.image = deviceIcon
-                                // 关键设置：确保图标在视图中居中显示，保持横纵比
-                                iconView?.imageScaling = .scaleProportionallyUpOrDown
-                                iconView?.alignment = .center
-                                // 确保NSImageView的cell也正确设置
-                                if let cell = iconView?.cell as? NSImageCell {
-                                    cell.imageScaling = .scaleProportionallyUpOrDown
-                                    cell.alignment = .center
-                                }
-                                compositeView.addSubview(iconView!)
-                            } else {
-                                // 如果所有图标都不可用，使用随机图标
-                                let randomIcon = self.generateRandomIcon()
-                                // 使用模板模式让系统根据主题自动调整颜色
-                                randomIcon.isTemplate = true
-                                // 计算图标在复合视图中上下居中的位置
-                                let actualIconHeight = randomIcon.size.height
-                                let iconY = (buttonHeight - actualIconHeight) / 2
-                                iconView = NSImageView(frame: NSRect(x: margin, y: iconY + 2, width: iconWidth, height: actualIconHeight))
-                                iconView?.image = randomIcon
-                                // 关键设置：确保图标在视图中居中显示，保持横纵比
-                                iconView?.imageScaling = .scaleProportionallyUpOrDown
-                                iconView?.alignment = .center
-                                // 确保NSImageView的cell也正确设置
-                                if let cell = iconView?.cell as? NSImageCell {
-                                    cell.imageScaling = .scaleProportionallyUpOrDown
-                                    cell.alignment = .center
-                                }
-                                compositeView.addSubview(iconView!)
-                            }
-                        } else {
-                            // 更新现有图标
-                            if let deviceIcon = self.getDeviceIcon(for: device, size: NSSize(width: iconWidth, height: iconWidth), applyTemplate: true) {
-                                iconView?.image = deviceIcon
-                            } else {
-                                let randomIcon = self.generateRandomIcon()
-                                randomIcon.isTemplate = true
-                                iconView?.image = randomIcon
-                            }
-                        }
+                        compositeImage.unlockFocus()
                         
-                        // 处理电量标签
-                        if batteryLabel == nil {
-                            // 创建新的电量标签
-                            batteryLabel = NSTextField(labelWithString: batteryText)
-                            // 计算电量文本在复合视图中上下居中的位置
-                            let textHeight: CGFloat = 24 // 文本高度
-                            let textY = (buttonHeight - textHeight) / 2
-                            batteryLabel?.frame = NSRect(x: margin + iconWidth, y: textY - 3, width: textWidth, height: textHeight)
-                            batteryLabel?.attributedStringValue = attributedText
-                            batteryLabel?.alignment = .left
-                            batteryLabel?.isBezeled = false
-                            batteryLabel?.isEditable = false
-                            batteryLabel?.drawsBackground = false
-                            compositeView.addSubview(batteryLabel!)
-                        } else {
-                            // 更新现有电量标签
-                            batteryLabel?.stringValue = batteryText
-                            batteryLabel?.attributedStringValue = attributedText
-                            batteryLabel?.frame = NSRect(x: margin + iconWidth, y: (buttonHeight - 24) / 2 - 3, width: textWidth, height: 24)
-                        }
+                        // 使用模板模式，让系统根据主题自动调整颜色
+                        compositeImage.isTemplate = true
+                        
+                        // 设置按钮图像
+                        button.image = compositeImage
                         
                         // 确保按钮大小正确，宽度自适应内容
                         button.frame = NSRect(x: 0, y: 0, width: totalWidth, height: buttonHeight)
-                        
-                        // 如果是新创建的复合视图，添加到按钮
-                        if existingCompositeView == nil {
-                            button.addSubview(compositeView)
-                        }
                     } else {
-                        // 即使不需要更新视图，也需要确保按钮宽度正确
-                        if wasHidden {
-                            button.frame = NSRect(x: 0, y: 0, width: totalWidth, height: buttonHeight)
-                        }
                         log("设备图标视图无需更新: \(device.name)")
                     }
                     
@@ -3057,8 +2988,10 @@ class StatusBarManager {
             if deviceID == device.id {
                 DispatchQueue.main.async {
                     // 隐藏之前的气泡
-                    if let popover = deviceInfo.popover {
+                    if let popover = deviceInfo.popover, popover.isShown {
+                        log("气泡已经显示，隐藏气泡")
                         popover.performClose(nil)
+                        return
                     }
                     
                     // 创建新的气泡
@@ -4159,6 +4092,9 @@ class CacheManager {
     // 存储DispatchSourceTimer
     private var cacheRefreshTimer: DispatchSourceTimer?
     
+    // 添加锁以确保线程安全
+    private let cacheLock = NSLock()
+    
     private init() {
         // 启动定期缓存刷新定时器
         startCacheRefreshTimer()
@@ -4229,10 +4165,12 @@ class CacheManager {
                                 // 检查缓存是否真正发生变化
                                 let cacheChanged = self.isCacheChanged(newCache: json)
                                 
-                                // 更新缓存
+                                // 更新缓存，添加线程安全保护
+                                self.cacheLock.lock()
                                 systemProfilerCache = (data: json, timestamp: Date())
                                 self.lastCacheData = json
-
+                                self.cacheLock.unlock()
+                                
                                 // 只有当缓存真正变化时，才发送缓存更新通知，触发设备信息更新
                                 if cacheChanged {
                                     log("缓存内容发生变化，发送BtBarCacheUpdated通知")
@@ -4255,8 +4193,13 @@ class CacheManager {
     
     // 检查缓存是否真正发生变化
     private func isCacheChanged(newCache: [String: Any]) -> Bool {
+        // 添加线程安全保护
+        cacheLock.lock()
+        let lastCache = lastCacheData
+        cacheLock.unlock()
+        
         // 如果是第一次缓存，认为发生了变化
-        guard let lastCache = lastCacheData else {
+        guard let lastCache = lastCache else {
             return true
         }
         
@@ -4356,9 +4299,11 @@ class CacheManager {
                                 // 检查缓存是否真正发生变化
                                 let cacheChanged = self.isCacheChanged(newCache: json)
                                 
-                                // 更新缓存
+                                // 更新缓存，添加线程安全保护
+                                self.cacheLock.lock()
                                 systemProfilerCache = (data: json, timestamp: Date())
                                 self.lastCacheData = json
+                                self.cacheLock.unlock()
                                 
                                 // 只有当缓存真正变化时，才发送缓存更新通知，触发设备信息更新
                                 if cacheChanged {
