@@ -1161,8 +1161,8 @@ class StatusBarManager {
                         
                         // 绘制图标
                         if let deviceIcon = self.getDeviceIcon(for: device, size: NSSize(width: iconWidth, height: iconWidth), applyTemplate: true) {
-                            // 调整图标大小，确保高度为18，宽度保持原始横纵比
-                            let desiredIconHeight: CGFloat = 18
+                            // 调整图标大小，确保高度为16，宽度保持原始横纵比
+                            let desiredIconHeight: CGFloat = 16
                             let scale = desiredIconHeight / deviceIcon.size.height
                             let scaledWidth = deviceIcon.size.width * scale
                             let scaledHeight = desiredIconHeight
@@ -1175,8 +1175,8 @@ class StatusBarManager {
                             // 如果所有图标都不可用，使用随机图标
                             let randomIcon = self.generateRandomIcon()
                             randomIcon.isTemplate = true
-                            // 调整图标大小，确保高度为18，宽度保持原始横纵比
-                            let desiredIconHeight: CGFloat = 18
+                            // 调整图标大小，确保高度为16，宽度保持原始横纵比
+                            let desiredIconHeight: CGFloat = 16
                             let scale = desiredIconHeight / randomIcon.size.height
                             let scaledWidth = randomIcon.size.width * scale
                             let scaledHeight = desiredIconHeight
