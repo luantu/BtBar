@@ -570,7 +570,7 @@ class BluetoothManager: NSObject, ObservableObject {
                                 
                                 // 等待信号量（最多5秒）
                                 _ = semaphore.wait(timeout: .now() + 5)
-                                log(waitTimeout ? "[system_profiler缓存] 缓存刷新等待超时" : "[system_profiler缓存] 缓存刷新完成，当前电量为 \(batteryLevels)")
+                                log(waitTimeout ? "[system_profiler缓存] 缓存刷新等待超时" : "[system_profiler缓存] 缓存刷新完成，当前电量为 \(batteryLevels.generalLevel ?? 0)")
                             }
                     }
                     
@@ -985,6 +985,8 @@ class StatusBarManager {
             }
             log("Status bar update completed")
         }
+        
+
     }
     
     @objc private func reloadDisplaySettings() {
@@ -1007,6 +1009,8 @@ class StatusBarManager {
         defaults.synchronize()
         log("Saved device display settings: \(showDeviceIcons)")
     }
+    
+
     
     internal func updateStatusItems(devices: [BluetoothDevice]) {
         log("开始更新状态栏图标，设备数量: \(devices.count)")
@@ -1063,17 +1067,24 @@ class StatusBarManager {
                 }
             }
             
-            // 隐藏不再需要显示的设备图标，而不是移除它们，这样可以记住位置
-            var devicesToHide: [String] = []
+            // 隐藏不再需要显示的设备图标，完全移除它们以消除占位符
+            var devicesToRemove: [String] = []
             for (deviceID, deviceInfo) in self.deviceStatusItems {
                 if !devicesToShow.contains(where: { $0.id == deviceID }) {
-                    devicesToHide.append(deviceID)
-                    // 隐藏状态栏图标并将宽度设置为0，避免出现空白
-                    if let button = deviceInfo.statusItem.button {
-                        button.isHidden = true
-                        button.frame = NSRect(x: 0, y: 0, width: 0, height: 0)
-                        log("隐藏不需要显示的设备图标: \(deviceInfo.device.name)")
+                    devicesToRemove.append(deviceID)
+                    log("移除不需要显示的设备图标: \(deviceInfo.device.name)")
+                    
+                    // 保存当前位置
+                    let autosaveName = deviceInfo.statusItem.autosaveName ?? ""
+                    if !autosaveName.isEmpty {
+                        let positionKey = "NSStatusItem Preferred Position \(autosaveName)"
+                        let savedPositionKey = "BtBarSavedPosition_\(deviceID)"
+                        if let currentPosition = UserDefaults.standard.object(forKey: positionKey) {
+                            UserDefaults.standard.set(currentPosition, forKey: savedPositionKey)
+                            log("Saved position for device \(deviceID): \(currentPosition)")
+                        }
                     }
+                    
                     // 更新设备状态为断开连接
                     if var lastState = self.lastDeviceStates[deviceID] {
                         lastState.isConnected = false
@@ -1082,6 +1093,17 @@ class StatusBarManager {
                 }
             }
             
+            // 从字典和数组中移除设备
+            for deviceID in devicesToRemove {
+                if let deviceInfo = self.deviceStatusItems[deviceID] {
+                    // 从字典中移除设备
+                    self.deviceStatusItems.removeValue(forKey: deviceID)
+                    // 从statusItems数组中移除对应的状态项（保留应用图标）
+                    if let index = self.statusItems.firstIndex(where: { $0 == deviceInfo.statusItem }) {
+                        self.statusItems.remove(at: index)
+                    }
+                }
+            }
             
             // 更新或添加需要显示的设备图标
             for device in devicesToShow {
@@ -1107,11 +1129,21 @@ class StatusBarManager {
                 if let existingItem = self.deviceStatusItems[device.id] {
                     // 使用现有的状态栏图标
                     deviceStatusItem = existingItem.statusItem
-                    // 显示图标
-                    deviceStatusItem.button?.isHidden = false
                 } else {
                     // 创建一个新的状态栏图标，使用可变长度以容纳电量文本
                     deviceStatusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+                    // 设置autosaveName，用于系统存储位置
+                    deviceStatusItem.autosaveName = "BtBarStatusItem_" + device.id
+                    // 恢复保存的位置
+                    let autosaveName = deviceStatusItem.autosaveName ?? ""
+                    if !autosaveName.isEmpty {
+                        let positionKey = "NSStatusItem Preferred Position \(autosaveName)"
+                        let savedPositionKey = "BtBarSavedPosition_\(device.id)"
+                        if let savedPosition = UserDefaults.standard.object(forKey: savedPositionKey) {
+                            UserDefaults.standard.set(savedPosition, forKey: positionKey)
+                            log("Restored position for device \(device.id): \(savedPosition)")
+                        }
+                    }
                     self.statusItems.append(deviceStatusItem)
                 }
                 
