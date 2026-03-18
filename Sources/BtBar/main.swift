@@ -548,6 +548,7 @@ class BluetoothManager: NSObject, ObservableObject {
                             if batteryLevels.generalLevel == nil {
                                 let semaphore = DispatchSemaphore(value: 0)
                                 var waitTimeout = false
+                                var updatedBatteryLevels = self.fetchRealBatteryLevel(for: tempDevice)
                                 
                                 // 刷新缓存
                                 CacheManager.shared.refreshSystemProfilerCache()
@@ -555,33 +556,47 @@ class BluetoothManager: NSObject, ObservableObject {
                                 // 后台线程非阻塞等待缓存
                                 DispatchQueue.global(qos: .background).async {
                                     let startWaitTime = Date()
-                                    var batteryLevels = self.fetchRealBatteryLevel(for: tempDevice)
-                                    while getCachedSystemProfilerData() == nil,
-                                        Date().timeIntervalSince(startWaitTime) < 5,
-                                        batteryLevels.generalLevel == nil {
+                                    var localBatteryLevels = self.fetchRealBatteryLevel(for: tempDevice)
+                                while (getCachedSystemProfilerData() == nil || 
+                                    (localBatteryLevels.generalLevel == nil && localBatteryLevels.leftLevel == nil)) && 
+                                    Date().timeIntervalSince(startWaitTime) < 30 {
                                         // 关键：用 Thread.sleep 替代 usleep，释放 CPU 核心
-                                        batteryLevels = self.fetchRealBatteryLevel(for: tempDevice)
+                                        localBatteryLevels = self.fetchRealBatteryLevel(for: tempDevice)
                                         Thread.sleep(forTimeInterval: 0.1)
                                     }
+                                    // 更新结果
+                                    updatedBatteryLevels = localBatteryLevels
                                     // 超时判断
-                                    waitTimeout = Date().timeIntervalSince(startWaitTime) >= 5
+                                    waitTimeout = Date().timeIntervalSince(startWaitTime) >= 30
                                     semaphore.signal()
                                 }
                                 
                                 // 等待信号量（最多5秒）
                                 _ = semaphore.wait(timeout: .now() + 5)
-                                log(waitTimeout ? "[system_profiler缓存] 缓存刷新等待超时" : "[system_profiler缓存] 缓存刷新完成，当前电量为 \(batteryLevels.generalLevel ?? 0)")
+                                log(waitTimeout ? "[system_profiler缓存] 缓存刷新等待超时" : "[system_profiler缓存] 缓存刷新完成，当前电量为 \(updatedBatteryLevels.generalLevel ?? updatedBatteryLevels.leftLevel ?? 0)")
                             }
                     }
                     
                     // 直接获取电量，因为缓存已经确保存在
                     let batteryLevels = fetchRealBatteryLevel(for: tempDevice)
                     if batteryLevels.caseLevel != nil || batteryLevels.leftLevel != nil || batteryLevels.rightLevel != nil || batteryLevels.generalLevel != nil {
-                        // 对于苹果设备，使用通用电量或左耳电量作为显示电量
-                        batteryLevel = batteryLevels.generalLevel ?? batteryLevels.leftLevel
                         caseBatteryLevel = batteryLevels.caseLevel
                         leftBatteryLevel = batteryLevels.leftLevel
                         rightBatteryLevel = batteryLevels.rightLevel
+                        // 使用与气泡相同的电量计算逻辑
+                        if let leftLevel = leftBatteryLevel, let rightLevel = rightBatteryLevel {
+                            // 左右耳都有，使用平均值
+                            batteryLevel = (leftLevel + rightLevel) / 2
+                        } else if let leftLevel = leftBatteryLevel {
+                            // 只有左耳，使用左耳电量
+                            batteryLevel = leftLevel
+                        } else if let rightLevel = rightBatteryLevel {
+                            // 只有右耳，使用右耳电量
+                            batteryLevel = rightLevel
+                        } else {
+                            // 非苹果设备使用通用电量
+                            batteryLevel = batteryLevels.generalLevel
+                        }
                     } else {
                         // 无法获取真实电量，设置为nil
                         batteryLevel = nil
@@ -999,7 +1014,11 @@ class StatusBarManager {
         let defaults = UserDefaults.standard
         if let savedSettings = defaults.dictionary(forKey: "deviceDisplaySettings") as? [String: Bool] {
             showDeviceIcons = savedSettings
-            log("Loaded device display settings: \(showDeviceIcons)")
+            log("Loaded device display settings:")
+            log("  - deviceID         : showIcon")
+            for (deviceID, showIcon) in showDeviceIcons {
+                log("  - \(deviceID): \(showIcon)")
+            }
         }
     }
     
@@ -1007,7 +1026,11 @@ class StatusBarManager {
         let defaults = UserDefaults.standard
         defaults.set(showDeviceIcons, forKey: "deviceDisplaySettings")
         defaults.synchronize()
-        log("Saved device display settings: \(showDeviceIcons)")
+        log("Saved device display settings:")
+        log("  - deviceID         : showIcon")
+        for (deviceID, showIcon) in showDeviceIcons {
+            log("  - \(deviceID): \(showIcon)")
+        }
     }
     
 
@@ -1562,7 +1585,20 @@ class StatusBarManager {
                     caseBatteryLevel = batteryLevels.caseLevel
                     leftBatteryLevel = batteryLevels.leftLevel
                     rightBatteryLevel = batteryLevels.rightLevel
-                    batteryLevel = batteryLevels.generalLevel ?? batteryLevels.leftLevel
+                    // 使用与设备列表相同的电量计算逻辑
+                    if let leftLevel = leftBatteryLevel, let rightLevel = rightBatteryLevel {
+                        // 左右耳都有，使用平均值
+                        batteryLevel = (leftLevel + rightLevel) / 2
+                    } else if let leftLevel = leftBatteryLevel {
+                        // 只有左耳，使用左耳电量
+                        batteryLevel = leftLevel
+                    } else if let rightLevel = rightBatteryLevel {
+                        // 只有右耳，使用右耳电量
+                        batteryLevel = rightLevel
+                    } else {
+                        // 非苹果设备使用通用电量
+                        batteryLevel = batteryLevels.generalLevel
+                    }
                 }
                 
                 let device = BluetoothDevice(
