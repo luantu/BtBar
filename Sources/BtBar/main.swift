@@ -1802,7 +1802,7 @@ class StatusBarManager {
         private func setupTrackingArea() {
             let trackingArea = NSTrackingArea(
                 rect: self.bounds,
-                options: [.mouseEnteredAndExited, .activeInKeyWindow],
+                options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
                 owner: self,
                 userInfo: nil
             )
@@ -1815,6 +1815,10 @@ class StatusBarManager {
                 self.removeTrackingArea(trackingArea)
             }
             setupTrackingArea()
+        }
+        
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            return self
         }
         
         override func mouseEntered(with event: NSEvent) {
@@ -2228,7 +2232,7 @@ class StatusBarManager {
         // 添加鼠标悬停效果的跟踪区域
         let trackingArea = NSTrackingArea(
             rect: deviceView.bounds,
-            options: [.mouseEnteredAndExited, .activeInKeyWindow],
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
             owner: deviceView,
             userInfo: nil
         )
