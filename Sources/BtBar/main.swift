@@ -3438,6 +3438,13 @@ class StatusBarManager {
                         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .maxY)
                     }
                     
+                    // 激活应用程序并使气泡窗口获得焦点
+                    NSApp.activate(ignoringOtherApps: true)
+                    // 让 popover 窗口成为 key window 以获得焦点
+                    if let popoverWindow = popover.contentViewController?.view.window {
+                        popoverWindow.makeKey()
+                    }
+                    
                     // 更新设备状态栏图标映射，存储气泡
                     self.deviceStatusItems[deviceID] = (statusItem: deviceInfo.statusItem, device: device, popover: popover)
                     
@@ -3454,6 +3461,7 @@ class StatusBarManager {
                     }
                     
                     // 添加全局点击监听器，确保点击外部时关闭弹窗
+                    // 注意：全局监听器只能捕获其他应用的事件，本地事件需要单独监听
                     let mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak popover] event in
                         if let popover = popover, popover.isShown {
                             // 检查点击位置是否在 popover 窗口内
@@ -3461,13 +3469,9 @@ class StatusBarManager {
                                 let popoverFrame = popoverWindow.frame
                                 let mouseLocation = NSEvent.mouseLocation
                                 
-                                // 注意：NSEvent.mouseLocation 的 y 坐标是从屏幕底部开始计算的，而 popoverFrame 的 y 坐标是从屏幕顶部开始计算的
-                                // 所以需要转换坐标系统
-                                let screenHeight = NSScreen.main?.frame.height ?? 0
-                                let convertedMouseLocation = NSPoint(x: mouseLocation.x, y: screenHeight - mouseLocation.y)
-                                
+                                // NSEvent.mouseLocation 和 NSWindow.frame 都使用相同的屏幕坐标系（y 从底部开始）
                                 // 如果点击位置不在 popover 窗口内，关闭 popover
-                                if !popoverFrame.contains(convertedMouseLocation) {
+                                if !popoverFrame.contains(mouseLocation) {
                                     // 先隐藏所有tooltip窗口
                                     HoverableButton.hideAllTooltips()
                                     // 再关闭气泡
@@ -3477,12 +3481,43 @@ class StatusBarManager {
                         }
                     }
                     
+                    // 添加本地点击监听器，捕获当前应用内的点击事件
+                    let localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak popover] event in
+                        if let popover = popover, popover.isShown {
+                            // 获取 popover 窗口
+                            if let popoverWindow = popover.contentViewController?.view.window {
+                                // 检查事件发生的窗口是否是 popover 窗口
+                                // 如果点击的是 popover 窗口内部，不关闭
+                                if event.window === popoverWindow {
+                                    return event
+                                }
+                                
+                                // 检查点击位置是否在 popover 窗口内
+                                let popoverFrame = popoverWindow.frame
+                                let mouseLocation = NSEvent.mouseLocation
+                                
+                                // 如果点击位置不在 popover 窗口内，关闭 popover
+                                if !popoverFrame.contains(mouseLocation) {
+                                    // 先隐藏所有tooltip窗口
+                                    HoverableButton.hideAllTooltips()
+                                    // 再关闭气泡
+                                    popover.performClose(nil)
+                                }
+                            }
+                        }
+                        return event
+                    }
+                    
                     // 添加气泡关闭通知监听器，确保在气泡关闭时隐藏所有tooltip窗口并移除鼠标监听器
-                    _ = NotificationCenter.default.addObserver(forName: NSPopover.willCloseNotification, object: popover, queue: nil) { [weak popover, mouseMonitor] _ in
+                    _ = NotificationCenter.default.addObserver(forName: NSPopover.willCloseNotification, object: popover, queue: nil) { [weak popover, mouseMonitor, localMouseMonitor] _ in
                         // 隐藏所有tooltip窗口
                         HoverableButton.hideAllTooltips()
                         // 移除鼠标监听器
                         if let monitor = mouseMonitor {
+                            NSEvent.removeMonitor(monitor)
+                        }
+                        // 移除本地鼠标监听器
+                        if let monitor = localMouseMonitor {
                             NSEvent.removeMonitor(monitor)
                         }
                         // 移除通知监听器本身
