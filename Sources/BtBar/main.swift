@@ -656,16 +656,8 @@ class BluetoothManager: NSObject, ObservableObject {
                     }
                 }
                 
-                // 更新设备列表
+                // 更新设备列表（sink 会自动触发 updateStatusItems）
                 self.g_devices = newDevices
-                
-                // 立即触发StatusBarManager的updateStatusItems方法，确保状态栏图标立即更新
-                let appDelegate = NSApplication.shared.delegate as? AppDelegate
-                let statusBarManager = appDelegate?.statusBarManager
-                
-                if let statusBarManager = statusBarManager {
-                    statusBarManager.updateStatusItems(devices: self.g_devices)
-                }
                 
                 // 只有当设备信息真正变化时才发送通知
                 if devicesChanged {
@@ -688,15 +680,8 @@ class BluetoothManager: NSObject, ObservableObject {
                 // 检查设备列表是否真正发生变化
                 let devicesChanged = !self.g_devices.isEmpty
                 
+                // 清空设备列表（sink 会自动触发 updateStatusItems）
                 self.g_devices.removeAll()
-                
-                // 立即触发StatusBarManager的updateStatusItems方法，确保状态栏图标立即更新
-                let appDelegate = NSApplication.shared.delegate as? AppDelegate
-                let statusBarManager = appDelegate?.statusBarManager
-                
-                if let statusBarManager = statusBarManager {
-                    statusBarManager.updateStatusItems(devices: self.g_devices)
-                }
                 
                 // 当设备信息真正变化时才发送通知
                 if devicesChanged {
@@ -967,6 +952,7 @@ class StatusBarManager {
     private var settingsHostingController: NSViewController? // 存储设置窗口的hosting controller引用
     private var lastClickLocation: NSPoint? // 存储最后一次鼠标点击位置
     private var buttonActions: [NSButton: () -> Void] = [:] // 存储按钮和对应的动作闭包
+    private var pendingPopoverDevices: Set<String> = [] // 存储正在等待显示弹窗的设备ID，防止重复弹窗
     
     init(bluetoothManager: BluetoothManager) {
         self.bluetoothManager = bluetoothManager
@@ -1276,54 +1262,66 @@ class StatusBarManager {
                 
                 // 如果设备刚刚连接，自动弹出气泡详情
                 if justConnected {
-                    // 延迟一点时间，确保图标已经完全创建
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        // 检查是否有电量信息，如果没有，等待一段时间后再显示
-                        if device.batteryLevel != nil || device.leftBatteryLevel != nil || device.rightBatteryLevel != nil {
-                            // 已有电量信息，直接显示
-                            self.showDeviceDetailsForDevice(device, autoClose: true)
-                        } else {
-                            // 没有电量信息，等待缓存刷新后再显示
-                            log("设备刚连接，等待电量信息...")
-                            // 最多等待3秒，直到获取到电量信息
-                            let startWaitTime = Date()
-                            var hasBatteryInfo = false
-                            var cacheRefreshed = false
+                    // 检查是否已有弹窗正在等待显示，防止重复弹窗
+                    if self.pendingPopoverDevices.contains(device.id) {
+                        log("设备 \(device.name) 已有弹窗正在等待显示，跳过")
+                    } else {
+                        // 标记该设备正在等待显示弹窗
+                        self.pendingPopoverDevices.insert(device.id)
+                        
+                        // 延迟一点时间，确保图标已经完全创建
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                            guard let self = self else { return }
                             
-                            // 在后台线程中等待电量信息
-                            DispatchQueue.global(qos: .background).async {
-                                while !hasBatteryInfo && Date().timeIntervalSince(startWaitTime) < 3 {
-                                    // 再次获取设备信息
-                                    let updatedDevices = self.bluetoothManager.g_devices
-                                    if let updatedDevice = updatedDevices.first(where: { $0.id == device.id }) {
-                                        if updatedDevice.batteryLevel != nil || updatedDevice.leftBatteryLevel != nil || updatedDevice.rightBatteryLevel != nil {
-                                            hasBatteryInfo = true
-                                            // 在主线程中显示弹窗
-                                            DispatchQueue.main.async {
-                                                self.showDeviceDetailsForDevice(updatedDevice, autoClose: true)
-                                            }
-                                        } else if !cacheRefreshed {
-                                            // 没有电量信息，且缓存还没有刷新，触发缓存刷新
-                                            log("未获取到电量信息，触发缓存刷新...")
-                                            CacheManager.shared.refreshSystemProfilerCache()
-                                            cacheRefreshed = true
-                                        }
-                                    }
-                                    usleep(100000) // 等待100ms
-                                }
+                            // 检查是否有电量信息，如果没有，等待一段时间后再显示
+                            if device.batteryLevel != nil || device.leftBatteryLevel != nil || device.rightBatteryLevel != nil {
+                                // 已有电量信息，直接显示
+                                self.showDeviceDetailsForDevice(device, autoClose: true)
+                            } else {
+                                // 没有电量信息，等待缓存刷新后再显示
+                                log("设备刚连接，等待电量信息...")
+                                // 最多等待3秒，直到获取到电量信息
+                                let startWaitTime = Date()
+                                var hasBatteryInfo = false
+                                var cacheRefreshed = false
                                 
-                                // 如果超时仍未获取到电量信息，也显示弹窗
-                                if !hasBatteryInfo {
-                                    DispatchQueue.main.async {
-                                        self.showDeviceDetailsForDevice(device, autoClose: true)
+                                // 在后台线程中等待电量信息
+                                DispatchQueue.global(qos: .background).async { [weak self] in
+                                    guard let self = self else { return }
+                                    
+                                    while !hasBatteryInfo && Date().timeIntervalSince(startWaitTime) < 3 {
+                                        // 再次获取设备信息
+                                        let updatedDevices = self.bluetoothManager.g_devices
+                                        if let updatedDevice = updatedDevices.first(where: { $0.id == device.id }) {
+                                            if updatedDevice.batteryLevel != nil || updatedDevice.leftBatteryLevel != nil || updatedDevice.rightBatteryLevel != nil {
+                                                hasBatteryInfo = true
+                                                // 在主线程中显示弹窗
+                                                DispatchQueue.main.async {
+                                                    self.showDeviceDetailsForDevice(updatedDevice, autoClose: true)
+                                                }
+                                            } else if !cacheRefreshed {
+                                                // 没有电量信息，且缓存还没有刷新，触发缓存刷新
+                                                log("未获取到电量信息，触发缓存刷新...")
+                                                CacheManager.shared.refreshSystemProfilerCache()
+                                                cacheRefreshed = true
+                                            }
+                                        }
+                                        usleep(100000) // 等待100ms
+                                    }
+                                    
+                                    // 如果超时仍未获取到电量信息，也显示弹窗
+                                    if !hasBatteryInfo {
+                                        DispatchQueue.main.async {
+                                            self.showDeviceDetailsForDevice(device, autoClose: true)
+                                        }
                                     }
                                 }
                             }
                         }
+                        
+                        // 调用统一的音频设备切换方法，不显示操作结果
+                        self.switchToDefaultAudioDevice(device, showAlert: false)
                     }
-                    
-                    // 调用统一的音频设备切换方法，不显示操作结果
-                    self.switchToDefaultAudioDevice(device, showAlert: false)
                 }
                 
                 let deviceUpdateTime = Date()
@@ -3052,6 +3050,9 @@ class StatusBarManager {
     }
     
     internal func showDeviceDetailsForDevice(_ device: BluetoothDevice, autoClose: Bool = false) {
+        // 从待显示列表中移除该设备
+        pendingPopoverDevices.remove(device.id)
+        
         // 确保应用程序处于活动状态
         NSApp.activate(ignoringOtherApps: true)
         
