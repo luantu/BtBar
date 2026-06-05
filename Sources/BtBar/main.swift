@@ -243,20 +243,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func checkBluetoothPermission() {
-        let ioBluetoothAvailable = IOBluetoothDevice.pairedDevices() != nil
-        
-        if !ioBluetoothAvailable {
-            log("⚠️ 蓝牙不可用或未授权")
-            DispatchQueue.main.async {
-                let alert = NSAlert()
-                alert.messageText = "需要蓝牙权限"
-                alert.informativeText = "BtBar 需要蓝牙权限来管理你的蓝牙设备。请在「系统设置 → 隐私与安全性 → 蓝牙」中允许 BtBar 访问蓝牙。"
-                alert.addButton(withTitle: "打开系统设置")
-                alert.addButton(withTitle: "知道了")
-                let response = alert.runModal()
-                if response == .alertFirstButtonReturn {
-                    if let url = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?privacy=Bluetooth") {
-                        NSWorkspace.shared.open(url)
+        // 在后台线程检测蓝牙权限，避免阻塞主线程
+        DispatchQueue.global(qos: .background).async {
+            let ioBluetoothAvailable = IOBluetoothDevice.pairedDevices() != nil
+            
+            if !ioBluetoothAvailable {
+                log("⚠️ 蓝牙不可用或未授权")
+                DispatchQueue.main.async {
+                    let alert = NSAlert()
+                    alert.messageText = "需要蓝牙权限"
+                    alert.informativeText = "BtBar 需要蓝牙权限来管理你的蓝牙设备。请在「系统设置 → 隐私与安全性 → 蓝牙」中允许 BtBar 访问蓝牙。"
+                    alert.addButton(withTitle: "打开系统设置")
+                    alert.addButton(withTitle: "知道了")
+                    let response = alert.runModal()
+                    if response == .alertFirstButtonReturn {
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?privacy=Bluetooth") {
+                            NSWorkspace.shared.open(url)
+                        }
                     }
                 }
             }
@@ -1571,6 +1574,7 @@ class StatusBarManager {
             // 分离已连接和未连接的设备
             var connectedDevices: [BluetoothDevice] = []
             var disconnectedDevices: [BluetoothDevice] = []
+            var seenAddresses: Set<String> = []
             
             for bluetoothDevice in devicesArray {
                 let deviceName = bluetoothDevice.name ?? "Unknown"
@@ -1580,11 +1584,16 @@ class StatusBarManager {
                 var deviceID: String
                 
                 if !addressString.isEmpty {
-                    // 使用地址字符串作为设备ID
                     deviceID = addressString
                 } else {
                     // 如果没有地址，使用设备名称作为ID
                     deviceID = deviceName
+                }
+                
+                // 跳过重复的设备地址
+                if !seenAddresses.insert(deviceID).inserted {
+                    log("showDeviceMenu: 跳过重复的设备: \(deviceName) (\(deviceID))")
+                    continue
                 }
                 
                 // 从持久化存储中读取设备的自定义图标路径
@@ -2259,7 +2268,7 @@ class StatusBarManager {
         
         // 添加电量信息（如果有）
         if let batteryLevel = device.batteryLevel {
-            let batteryLabel = NSTextField(frame: NSRect(x: 152, y: 0, width: 34, height: 24))
+            let batteryLabel = NSTextField(frame: NSRect(x: 152, y: 0, width: 38, height: 24))
             batteryLabel.stringValue = "\(batteryLevel)%"
             batteryLabel.isBezeled = false
             batteryLabel.isEditable = false
