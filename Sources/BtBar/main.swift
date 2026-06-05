@@ -213,6 +213,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 请求通知权限
         requestNotificationPermission()
         
+        // 检查蓝牙权限
+        checkBluetoothPermission()
+        
         // 获取蓝牙管理器实例
         let bluetoothManager = BtBarApp.bluetoothManager
         
@@ -234,6 +237,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     log("Notification permission granted")
                 } else if let error = error {
                     log("Error requesting notification permission: \(error)")
+                }
+            }
+        }
+    }
+    
+    private func checkBluetoothPermission() {
+        let ioBluetoothAvailable = IOBluetoothDevice.pairedDevices() != nil
+        
+        if !ioBluetoothAvailable {
+            log("⚠️ 蓝牙不可用或未授权")
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                alert.messageText = "需要蓝牙权限"
+                alert.informativeText = "BtBar 需要蓝牙权限来管理你的蓝牙设备。请在「系统设置 → 隐私与安全性 → 蓝牙」中允许 BtBar 访问蓝牙。"
+                alert.addButton(withTitle: "打开系统设置")
+                alert.addButton(withTitle: "知道了")
+                let response = alert.runModal()
+                if response == .alertFirstButtonReturn {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?privacy=Bluetooth") {
+                        NSWorkspace.shared.open(url)
+                    }
                 }
             }
         }
@@ -803,6 +827,12 @@ class BluetoothManager: NSObject, ObservableObject {
     
     // 尝试从设备获取真实电量
     func fetchRealBatteryLevel(for device: BluetoothDevice) -> (caseLevel: Int?, leftLevel: Int?, rightLevel: Int?, generalLevel: Int?) {
+        // 先尝试通过 IOBluetoothDevice KVC 获取电量（适用于非 Apple 蓝牙设备）
+        if let frameworkBattery = fetchBatteryFromDeviceFramework(macAddress: device.macAddress) {
+            log("通过 IOBluetoothDevice KVC 获取到电量: \(frameworkBattery)%")
+            return (nil, nil, nil, frameworkBattery)
+        }
+        
         // 仅使用system_profiler SPBluetoothDataType -json获取电量
         guard let json = getCachedSystemProfilerData(),
               let bluetoothData = json["SPBluetoothDataType"] as? [[String: Any]] else {
@@ -870,6 +900,20 @@ class BluetoothManager: NSObject, ObservableObject {
         }
         
         return (nil, nil, nil, nil) // 不使用模拟电量，返回nil表示无法获取
+    }
+    
+    // 通过 IOBluetoothDevice 的私有 KVC 方法获取电量（适用于非 Apple 蓝牙设备）
+    private func fetchBatteryFromDeviceFramework(macAddress: String) -> Int? {
+        guard let btDevice = IOBluetoothDevice(addressString: macAddress) else { return nil }
+        guard btDevice.isConnected() else { return nil }
+        
+        let sel = Selector(("batteryPercentSingle"))
+        guard btDevice.responds(to: sel) else { return nil }
+        
+        if let value = btDevice.value(forKey: "batteryPercentSingle") as? Int, value > 0 {
+            return value
+        }
+        return nil
     }
     
     private func checkBatteryLevel(for device: BluetoothDevice) {
@@ -2190,7 +2234,7 @@ class StatusBarManager {
         deviceView.addSubview(iconImageView)
         
         // 添加设备名称
-        let nameLabel = NSTextField(frame: NSRect(x: 40, y: 0, width: 120, height: 24))
+        let nameLabel = NSTextField(frame: NSRect(x: 40, y: 0, width: 110, height: 24))
         nameLabel.stringValue = device.name
         nameLabel.isBezeled = false
         nameLabel.isEditable = false
@@ -2202,7 +2246,7 @@ class StatusBarManager {
         deviceView.addSubview(nameLabel)
         
         // 添加连接状态指示器
-        let statusLabel = NSTextField(frame: NSRect(x: 150, y: 0, width: 20, height: 24))
+        let statusLabel = NSTextField(frame: NSRect(x: 190, y: 0, width: 20, height: 24))
         statusLabel.stringValue = device.isConnected ? "●" : ""
         statusLabel.isBezeled = false
         statusLabel.isEditable = false
@@ -2215,7 +2259,7 @@ class StatusBarManager {
         
         // 添加电量信息（如果有）
         if let batteryLevel = device.batteryLevel {
-            let batteryLabel = NSTextField(frame: NSRect(x: 170, y: 0, width: 40, height: 24))
+            let batteryLabel = NSTextField(frame: NSRect(x: 152, y: 0, width: 34, height: 24))
             batteryLabel.stringValue = "\(batteryLevel)%"
             batteryLabel.isBezeled = false
             batteryLabel.isEditable = false
