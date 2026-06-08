@@ -2255,7 +2255,7 @@ class StatusBarManager {
         deviceView.addSubview(nameLabel)
         
         // 添加连接状态指示器
-        let statusLabel = NSTextField(frame: NSRect(x: 214, y: 4, width: 16, height: 16))
+        let statusLabel = NSTextField(frame: NSRect(x: 214, y: 4, width: 12, height: 16))
         statusLabel.stringValue = device.isConnected ? "●" : ""
         statusLabel.isBezeled = false
         statusLabel.isEditable = false
@@ -2268,7 +2268,7 @@ class StatusBarManager {
         
         // 添加电量信息（如果有）
         if let batteryLevel = device.batteryLevel {
-            let batteryLabel = NSTextField(frame: NSRect(x: 159, y: 0, width: 55, height: 24))
+            let batteryLabel = NSTextField(frame: NSRect(x: 159, y: 0, width: 50, height: 24))
             batteryLabel.stringValue = "\(batteryLevel)%"
             batteryLabel.isBezeled = false
             batteryLabel.isEditable = false
