@@ -2216,7 +2216,7 @@ class StatusBarManager {
         deviceItem.representedObject = device // 设置 representedObject 以便后续检测状态变化
         
         // 创建设备信息视图
-        let deviceView = HoverableView(frame: NSRect(x: 0, y: 0, width: 220, height: 32))
+        let deviceView = HoverableView(frame: NSRect(x: 0, y: 0, width: 230, height: 32))
         deviceView.wantsLayer = true
         deviceView.layer?.backgroundColor = NSColor.clear.cgColor
         
@@ -2243,7 +2243,7 @@ class StatusBarManager {
         deviceView.addSubview(iconImageView)
         
         // 添加设备名称
-        let nameLabel = NSTextField(frame: NSRect(x: 40, y: 0, width: 110, height: 24))
+        let nameLabel = NSTextField(frame: NSRect(x: 40, y: 0, width: 119, height: 24))
         nameLabel.stringValue = device.name
         nameLabel.isBezeled = false
         nameLabel.isEditable = false
@@ -2255,20 +2255,20 @@ class StatusBarManager {
         deviceView.addSubview(nameLabel)
         
         // 添加连接状态指示器
-        let statusLabel = NSTextField(frame: NSRect(x: 190, y: 0, width: 20, height: 24))
+        let statusLabel = NSTextField(frame: NSRect(x: 214, y: 4, width: 16, height: 16))
         statusLabel.stringValue = device.isConnected ? "●" : ""
         statusLabel.isBezeled = false
         statusLabel.isEditable = false
         statusLabel.backgroundColor = .clear
         statusLabel.textColor = device.isConnected ? .systemGreen : .clear
-        statusLabel.font = NSFont.systemFont(ofSize: 13)
+        statusLabel.font = NSFont.systemFont(ofSize: 7)
         statusLabel.alignment = .right
         statusLabel.isSelectable = false
         deviceView.addSubview(statusLabel)
         
         // 添加电量信息（如果有）
         if let batteryLevel = device.batteryLevel {
-            let batteryLabel = NSTextField(frame: NSRect(x: 152, y: 0, width: 38, height: 24))
+            let batteryLabel = NSTextField(frame: NSRect(x: 159, y: 0, width: 55, height: 24))
             batteryLabel.stringValue = "\(batteryLevel)%"
             batteryLabel.isBezeled = false
             batteryLabel.isEditable = false
@@ -2318,7 +2318,7 @@ class StatusBarManager {
         menuItem.representedObject = representedObject
         
         // 创建带有悬停效果的视图
-        let menuItemView = HoverableView(frame: NSRect(x: 0, y: 0, width: 220, height: 32))
+        let menuItemView = HoverableView(frame: NSRect(x: 0, y: 0, width: 230, height: 32))
         menuItemView.wantsLayer = true
         menuItemView.layer?.backgroundColor = NSColor.clear.cgColor
         // 设置menuItem属性，确保点击事件能够正确触发
@@ -2374,7 +2374,7 @@ class StatusBarManager {
         deviceInfoItem.isEnabled = false
         
         // 创建设备信息视图
-        let deviceInfoView = NSView(frame: NSRect(x: 0, y: 0, width: 220, height: 50))
+        let deviceInfoView = NSView(frame: NSRect(x: 0, y: 0, width: 230, height: 50))
         deviceInfoView.wantsLayer = true
         deviceInfoView.layer?.backgroundColor = NSColor.clear.cgColor
         
@@ -2875,7 +2875,7 @@ class StatusBarManager {
         guard let submenu = menuItem.menu else { return }
         
         // 计算subMenu的大小
-        let submenuRect = NSRect(x: 0, y: 0, width: 220, height: 200) // 固定大小
+        let submenuRect = NSRect(x: 0, y: 0, width: 230, height: 200) // 固定大小
         
         // 创建加载遮罩
         let overlayFrame = NSRect(x: 0, y: 0, width: submenuRect.width, height: submenuRect.height)
