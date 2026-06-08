@@ -20,7 +20,7 @@ APP_DIR="$APP_NAME.app"
 # 清理旧构建
 rm -rf "$APP_DIR"
 rm -rf "$BUILD_DIR"
-rm -rf ".build" # 清理整个.build目录
+rm -rf ".build"
 
 # 构建应用
 swift build -c $BUILD_CONFIG --build-path .build
@@ -88,6 +88,15 @@ echo -n "APPL????" > "$APP_DIR/Contents/PkgInfo"
 # 设置执行权限
 chmod +x "$APP_DIR/Contents/MacOS/$APP_NAME"
 chmod +x "$0"
+
+# 代码签名（ad-hoc）
+# macOS 13+ 需要代码签名才能使用 UNUserNotificationCenter.requestAuthorization
+# 必须用 --identifier 指定与 Info.plist 一致的应用标识符
+echo "Code signing app bundle (ad-hoc)..."
+
+# 先签名可执行文件，再签名整个bundle（macOS 26不推荐--deep）
+codesign --force --sign - --identifier "com.example.${APP_NAME}" "$APP_DIR/Contents/MacOS/${APP_NAME}"
+codesign --force --sign - --identifier "com.example.${APP_NAME}" "$APP_DIR"
 
 echo "应用构建完成: $APP_DIR"
 echo "你可以通过以下命令运行应用:"

@@ -7,7 +7,7 @@ let package = Package(
         .macOS(.v13)
     ],
     dependencies: [
-        // 蓝牙相关依赖
+        // no external dependencies needed
     ],
     targets: [
         .executableTarget(

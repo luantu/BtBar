@@ -1240,7 +1240,7 @@ class StatusBarManager {
                         
                         // 计算实际内容宽度，自适应设备图标+标签的宽度，减小右侧空白3个单位
                         let adjustedMargin = margin - 5
-                        let actualContentWidth = margin + iconWidth + 2 + textWidth + adjustedMargin
+                        let actualContentWidth = margin + iconWidth + 4 + textWidth + adjustedMargin
                         let totalWidth = actualContentWidth
                         
                         // 创建合成图像
@@ -1277,7 +1277,7 @@ class StatusBarManager {
                         
                         // 绘制电量文本，确保与图标中心对齐，增加间距2个单位
                         let textY = (buttonHeight - textSize.height) / 2
-                        attributedText.draw(at: NSPoint(x: margin + iconWidth + 2, y: textY))
+                        attributedText.draw(at: NSPoint(x: margin + iconWidth + 4, y: textY))
                         
                         compositeImage.unlockFocus()
                         
