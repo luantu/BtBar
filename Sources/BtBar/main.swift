@@ -316,6 +316,9 @@ class BluetoothManager: NSObject, ObservableObject {
     private var lastNotificationTime: TimeInterval = 0
     private let notificationThrottleInterval: TimeInterval = 5.0 // 5秒节流
     
+    // 记录每个设备最后已知的有效电量，用于 system_profiler 间歇性丢失电量时回退
+    private var lastKnownBattery: [String: Int] = [:]
+    
     override init() {
         super.init()
         setupBluetoothNotifications()
@@ -571,7 +574,7 @@ class BluetoothManager: NSObject, ObservableObject {
                     // 缓存不为空，但是缓存内该设备的电量为nil，需要刷新缓存
                     if getCachedSystemProfilerData() != nil {
                          // 先获取一遍真实电量
-                        let batteryLevels = fetchRealBatteryLevel(for: tempDevice)
+var batteryLevels = fetchRealBatteryLevel(for: tempDevice)
                             if batteryLevels.generalLevel == nil {
                                 let semaphore = DispatchSemaphore(value: 0)
                                 var waitTimeout = false
@@ -605,7 +608,7 @@ class BluetoothManager: NSObject, ObservableObject {
                     }
                     
                     // 直接获取电量，因为缓存已经确保存在
-                    let batteryLevels = fetchRealBatteryLevel(for: tempDevice)
+                    var batteryLevels = fetchRealBatteryLevel(for: tempDevice)
                     if batteryLevels.caseLevel != nil || batteryLevels.leftLevel != nil || batteryLevels.rightLevel != nil || batteryLevels.generalLevel != nil {
                         caseBatteryLevel = batteryLevels.caseLevel
                         leftBatteryLevel = batteryLevels.leftLevel
@@ -625,8 +628,20 @@ class BluetoothManager: NSObject, ObservableObject {
                             batteryLevel = batteryLevels.generalLevel
                         }
                     } else {
-                        // 无法获取真实电量，设置为nil
-                        batteryLevel = nil
+                        // 无法获取真实电量，使用最后已知电量作为回退
+                        if let lastBattery = self.lastKnownBattery[deviceID] {
+                            batteryLevel = lastBattery
+                            log("使用最后已知电量: \(lastBattery)%")
+                            batteryLevels = (nil, nil, nil, lastBattery)
+                        } else {
+                            // 无法获取真实电量，设置为nil
+                            batteryLevel = nil
+                        }
+                    }
+                    
+                    // 记录有效电量，供下次回退使用
+                    if let validBattery = batteryLevel, validBattery > 0 {
+                        self.lastKnownBattery[deviceID] = validBattery
                     }
                 }
                 
@@ -2255,7 +2270,7 @@ class StatusBarManager {
         deviceView.addSubview(nameLabel)
         
         // 添加连接状态指示器
-        let statusLabel = NSTextField(frame: NSRect(x: 214, y: 4, width: 12, height: 16))
+        let statusLabel = NSTextField(frame: NSRect(x: 212, y: 4, width: 12, height: 16))
         statusLabel.stringValue = device.isConnected ? "●" : ""
         statusLabel.isBezeled = false
         statusLabel.isEditable = false
