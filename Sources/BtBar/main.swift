@@ -571,44 +571,39 @@ class BluetoothManager: NSObject, ObservableObject {
                 // 只有已连接的设备才尝试获取电量信息，并且不是设备断开的情况
                 if isConnected && !hasDisconnectedDevice {
                     log("设备ID \(tempDevice.id) 已连接，尝试获取电量")
-                    // 缓存不为空，但是缓存内该设备的电量为nil，需要刷新缓存
-                    if getCachedSystemProfilerData() != nil {
-                         // 先获取一遍真实电量
-var batteryLevels = fetchRealBatteryLevel(for: tempDevice)
-                            if batteryLevels.generalLevel == nil {
-                                let semaphore = DispatchSemaphore(value: 0)
-                                var waitTimeout = false
-                                var updatedBatteryLevels = self.fetchRealBatteryLevel(for: tempDevice)
-                                
-                                // 刷新缓存
-                                CacheManager.shared.refreshSystemProfilerCache()
-                                
-                                // 后台线程非阻塞等待缓存
-                                DispatchQueue.global(qos: .background).async {
-                                    let startWaitTime = Date()
-                                    var localBatteryLevels = self.fetchRealBatteryLevel(for: tempDevice)
-                                while (getCachedSystemProfilerData() == nil || 
-                                    (localBatteryLevels.generalLevel == nil && localBatteryLevels.leftLevel == nil)) && 
-                                    Date().timeIntervalSince(startWaitTime) < 30 {
-                                        // 关键：用 Thread.sleep 替代 usleep，释放 CPU 核心
-                                        localBatteryLevels = self.fetchRealBatteryLevel(for: tempDevice)
-                                        Thread.sleep(forTimeInterval: 0.1)
-                                    }
-                                    // 更新结果
-                                    updatedBatteryLevels = localBatteryLevels
-                                    // 超时判断
-                                    waitTimeout = Date().timeIntervalSince(startWaitTime) >= 30
-                                    semaphore.signal()
+                    
+                    var batteryLevels = fetchRealBatteryLevel(for: tempDevice)
+                    
+                    // 如果第一次获取不到电量，启动后台轮询等待缓存或 KVC 就绪
+                    if batteryLevels.generalLevel == nil {
+                        CacheManager.shared.refreshSystemProfilerCache()
+                        
+                        let semaphore = DispatchSemaphore(value: 0)
+                        var waitTimeout = false
+                        var updatedBatteryLevels = batteryLevels
+                        
+                        DispatchQueue.global(qos: .background).async {
+                            let startWaitTime = Date()
+                            var localBatteryLevels = batteryLevels
+                            while Date().timeIntervalSince(startWaitTime) < 30 {
+                                localBatteryLevels = self.fetchRealBatteryLevel(for: tempDevice)
+                                if localBatteryLevels.generalLevel != nil || localBatteryLevels.leftLevel != nil {
+                                    break
                                 }
-                                
-                                // 等待信号量（最多5秒）
-                                _ = semaphore.wait(timeout: .now() + 5)
-                                log(waitTimeout ? "[system_profiler缓存] 缓存刷新等待超时" : "[system_profiler缓存] 缓存刷新完成，当前电量为 \(updatedBatteryLevels.generalLevel ?? updatedBatteryLevels.leftLevel ?? 0)")
+                                Thread.sleep(forTimeInterval: 0.2)
                             }
+                            updatedBatteryLevels = localBatteryLevels
+                            waitTimeout = Date().timeIntervalSince(startWaitTime) >= 30
+                            semaphore.signal()
+                        }
+                        
+                        _ = semaphore.wait(timeout: .now() + 5)
+                        batteryLevels = updatedBatteryLevels
+                        log(waitTimeout ? "电量获取超时" : "电量获取完成，当前电量为 \(batteryLevels.generalLevel ?? batteryLevels.leftLevel ?? 0)")
                     }
                     
                     // 直接获取电量，因为缓存已经确保存在
-                    var batteryLevels = fetchRealBatteryLevel(for: tempDevice)
+                    batteryLevels = fetchRealBatteryLevel(for: tempDevice)
                     if batteryLevels.caseLevel != nil || batteryLevels.leftLevel != nil || batteryLevels.rightLevel != nil || batteryLevels.generalLevel != nil {
                         caseBatteryLevel = batteryLevels.caseLevel
                         leftBatteryLevel = batteryLevels.leftLevel
@@ -632,7 +627,7 @@ var batteryLevels = fetchRealBatteryLevel(for: tempDevice)
                         if let lastBattery = self.lastKnownBattery[deviceID] {
                             batteryLevel = lastBattery
                             log("使用最后已知电量: \(lastBattery)%")
-                            batteryLevels = (nil, nil, nil, lastBattery)
+                            batteryLevels = (caseLevel: nil, leftLevel: nil, rightLevel: nil, generalLevel: lastBattery)
                         } else {
                             // 无法获取真实电量，设置为nil
                             batteryLevel = nil
@@ -928,7 +923,7 @@ var batteryLevels = fetchRealBatteryLevel(for: tempDevice)
         let sel = Selector(("batteryPercentSingle"))
         guard btDevice.responds(to: sel) else { return nil }
         
-        if let value = btDevice.value(forKey: "batteryPercentSingle") as? Int, value > 0 {
+        if let value = btDevice.value(forKey: "batteryPercentSingle") as? Int {
             return value
         }
         return nil
