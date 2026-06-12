@@ -597,7 +597,7 @@ class BluetoothManager: NSObject, ObservableObject {
                             semaphore.signal()
                         }
                         
-                        _ = semaphore.wait(timeout: .now() + 5)
+                        _ = semaphore.wait(timeout: .now() + 15)
                         batteryLevels = updatedBatteryLevels
                         log(waitTimeout ? "电量获取超时" : "电量获取完成，当前电量为 \(batteryLevels.generalLevel ?? batteryLevels.leftLevel ?? 0)")
                     }
@@ -923,7 +923,7 @@ class BluetoothManager: NSObject, ObservableObject {
         let sel = Selector(("batteryPercentSingle"))
         guard btDevice.responds(to: sel) else { return nil }
         
-        if let value = btDevice.value(forKey: "batteryPercentSingle") as? Int {
+        if let value = btDevice.value(forKey: "batteryPercentSingle") as? Int, value > 0 {
             return value
         }
         return nil
